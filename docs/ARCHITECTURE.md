@@ -8,27 +8,23 @@
 ## 1. 总览
 
 ```
-用户
- │  main.py（REPL / 一次性）          cli.py（typer 子命令）
- └───────────────┬───────────────────────────┘
-                 │  都只调用同一套业务函数
-        pipeline.py（可复用流水线）
-   ┌─────────────┼──────────────┬───────────────────┐
-   ▼             ▼              ▼                   ▼
-run_search    run_ingest       ask              run_report
-（检索层）    （RAG 入库）   （RAG 问答）      （LangGraph 监督图）
-   │             │              │                   │
-   ▼             ▼              ▼                   ▼
-channels/sources  rag/*      rag/retriever      agents/supervisor
-mcp_client        tools/*    + llm.py           + 四个专家 agent
-search_llm        llm.py                        （内部同样用 rag/tools）
-   │
-   ▼
-config.py + userconfig.py（Settings / 供应商 JSON）
+入口      main.py（REPL / 一次性）        cli.py（typer 子命令）
+              │                              │
+编排          pipeline/session.py（可复用流水线：run_search / run_ingest / ask / run_report）
+              │
+     ┌────────┼───────────────┬───────────────────────┐
+     ▼        ▼               ▼                       ▼
+  检索层    RAG 层          问答层                  报告层
+sources/*   rag/*        rag/retriever          agents/supervisor
+llm/search  tools/*      + llm/factory          + 四个专家 agent
+     │        │               │                       │
+     └────────┴───────────────┴───────────────────────┘
+              ▼
+         core/*（config / logging / schema / utils / ui）
 ```
 
 **分层原则**：底层只提供能力（配置、模型、检索、RAG），中间层是确定性流水线，上层（图/REPL/CLI）只做编排与呈现。
-`main.py` 与 `cli.py` 不直接做检索或 RAG，全部经 `pipeline.py`，保证两种入口行为一致。
+`main.py` 与 `cli.py` 不直接做检索或 RAG，全部经 `pipeline/session.py`，保证两种入口行为一致。
 
 **一次 `report` 的数据流**：
 
@@ -42,7 +38,7 @@ plan → search_one×N → merge → ingest_one×M → summarize_one×M
 
 ## 2. 配置与模型层
 
-### `config.py` — 全局 Settings
+### `core/config.py` — 全局 Settings
 
 - 用 `pydantic-settings` 的 `BaseSettings` 读**仓库根目录** `.env` 与环境变量；`_abs()` 把所有相对路径解析到仓库根，避免从任意 cwd 启动时产物乱跑。
 - 承载全部可调参数（检索、切分、超时、并发、路径、MCP 等）。
@@ -55,7 +51,7 @@ plan → search_one×N → merge → ingest_one×M → summarize_one×M
   - `mcp_env()`：只透传已配置的 MCP 侧密钥/邮箱（避免 `${VAR}` 字面量残留）。
 - `get_settings()`：进程级单例，先读 `.env`，再用 `userconfig.apply_to()` 叠加 JSON 配置（JSON 优先）。
 
-### `llm.py` — 模型工厂
+### `llm/factory.py` — 模型工厂
 
 - `get_chat_model(role)`：按角色给不同 temperature（检索 0.0、写作 0.4…），依次尝试
   ① 通用供应商（`/connect` 或 `LLM_*`）→ ② `.env` 的 DashScope → ③ DeepSeek；未配置时抛 `ConfigError`（带可执行的修复建议）。
@@ -64,7 +60,7 @@ plan → search_one×N → merge → ingest_one×M → summarize_one×M
   统一用 `check_embedding_ctx_length=False` 并包一层 `RetryingEmbeddings`。
 - 所有请求都带 `timeout`（默认 180s）与有限重试。
 
-### `userconfig.py` — 供应商 JSON 配置
+### `sources/userconfig.py` — 供应商 JSON 配置
 
 - 数据结构：`Provider`（base_url / key / kind / chat_model / embedding_model / embedding_dim / 模型列表）与 `SearchChannel`。
 - 读写 `<仓库根>/.paper-agent/config.json`（项目内，原子写 + 0600，随项目移植；可用 `PAPER_AGENT_CONFIG` 改路径，相对路径相对仓库根）。
@@ -75,25 +71,25 @@ plan → search_one×N → merge → ingest_one×M → summarize_one×M
   `resolve_embedding()` 优先用户显式指定的 `embedding_provider`（`/embed` 设置）。
 - `settings_overrides()` / `apply_to()`：把当前供应商、默认模型、embedding 供应商、搜索渠道翻译成 `Settings` 覆盖字段。
 
-### `tui.py` — `/connect` 交互
+### `repl/tui.py` — `/connect` 交互
 
 - `connect_flow()`：预设/URL → 识别供应商 → 读 key → 拉模型 → 可选探测 embedding 维度 → 落盘。
 - `read_secret()`：只关 `ECHO` 保留行缓冲（`ICANON`），终端粘贴的括号标记不会混入 key；读完恢复终端属性。
 - `_sync_models()`：拉取 + 分类 + 推断默认；`embed_models_for()` 给选择器用。
-- 选择器统一委托 `repl_input.pick_value()`。
+- 选择器统一委托 `repl/input.pick_value()`。
 
 ---
 
 ## 3. 检索层
 
-### `channels.py` — 渠道注册表（元数据）
+### `sources/channels.py` — 渠道注册表（元数据）
 
 - `ChannelSpec`：`kind / label / base_url / description / needs_key / needs_email / group / builtin(免 key)`。
 - `REGISTRY` 登记全部渠道；`GROUP_ACADEMIC / GROUP_CN / GROUP_WEB` 分组；`PRESET_ORDER` 决定 `/channels add` 的编号顺序。
 - 辅助函数：`spec_for()`、`list_specs()`、`channel_label()`、`is_domestic()`、`domestic_first()`、`default_base_url()`。
-- 只放元数据，真正的请求实现在 `sources.py`。**默认不启用任何渠道**。
+- 只放元数据，真正的请求实现在 `sources/fetchers.py`。**默认不启用任何渠道**。
 
-### `sources.py` — 内置 HTTP 抓取
+### `sources/fetchers.py` — 内置 HTTP 抓取
 
 - HTTP 基础设施：`_request()`（GET，429/5xx/网络异常重试并尊重 `Retry-After`，4xx 不重试）、`_post_json()`（POST，`ensure_ascii` 开关给国图用）。UA、超时、`mailto` 都从这里统一处理。
 - 三个基础源：
@@ -110,15 +106,15 @@ plan → search_one×N → merge → ingest_one×M → summarize_one×M
   - `by_channel` 按 kind 分别收集结果；缺 key 的渠道跳过并标 `(需key)⊘`；
   - `papers_domestic_first()` 让国内库靠前；`_short_error()` 把异常压成 `429`/`Timeout`/`需key` 等短标签。
 
-### `search_llm.py` — 检索中的 LLM 增强
+### `llm/search.py` — 检索中的 LLM 增强
 
 - `expand_queries()`：把主题扩成多条英文检索式（提升召回）；`rank_papers()`：对合并后的候选做相关性重排/裁剪。
 - 两者都受 `llm_timeout` 约束，**失败/超时静默降级**为原始行为，绝不阻塞检索。
 
-### `mcp_client.py` + `mcp_servers.json` — MCP 接入
+### `sources/mcp.py` + `sources/mcp_servers.json` — MCP 接入
 
-- `mcp_servers.json`：只存模板（stdio 命令 / streamable_http URL），`${VAR}` 由 `load_server_specs()` 展开；命令缺失或 URL 未配置的 server 自动跳过。
-- `quiet_env()` + `mcp_quiet/sitecustomize.py`：给 MCP 子进程注入 `PYTHONPATH`，收敛第三方 logger 刷屏。
+- `sources/mcp_servers.json`：只存模板（stdio 命令 / streamable_http URL），`${VAR}` 由 `load_server_specs()` 展开；命令缺失或 URL 未配置的 server 自动跳过。
+- `quiet_env()` + `sources/mcp_quiet/sitecustomize.py`：给 MCP 子进程注入 `PYTHONPATH`，收敛第三方 logger 刷屏。
 - `build_client()`：`MultiServerMCPClient`，开启工具名前缀、工具异常转错误文本、调用日志拦截器。
 - `filter_tools()`：白名单收敛（76→27）、黑名单排除（scihub / google_scholar / watch 等）、无 S2 key 时不暴露 `search_semantic`；
   `only_enabled_sources=True` 时**进一步按已启用渠道收敛检索工具**（聚合工具 `search_papers` 保留，由 `sources` 参数限定；`arxiv-mcp-server` 那种单源 `search_papers` 按 arxiv 是否启用决定去留）。
@@ -132,7 +128,7 @@ plan → search_one×N → merge → ingest_one×M → summarize_one×M
 
 | 文件 | 原理 |
 |---|---|
-| `fetch.py` | 只抓开放获取 PDF：命中本地缓存直接返回；`httpx` 下载后校验 `%PDF` 魔数再落 `data/papers/<safe_filename(paper_id)>.pdf`（文件名规则在 `utils.safe_filename`）。返回 `(path, message)`，失败原因会写进入库结果。 |
+| `fetch.py` | 只抓开放获取 PDF：命中本地缓存直接返回；`httpx` 下载后校验 `%PDF` 魔数再落 `data/papers/<safe_filename(paper_id)>.pdf`（文件名规则在 `core.utils.safe_filename`）。返回 `(path, message)`，失败原因会写进入库结果。 |
 | `parse.py` | 优先 `pymupdf`（更快更准），失败/未装回退 `pdfplumber`。清洗：合并跨行连字符、压缩空白、去多页重复的页眉页脚；`_cut_references()` 在文末 References 处截断（保守策略，只在确实像文献表时才切）。`ParsedDoc` 保留逐页文本、engine 与 `title`（`guess_title()`：优先 PDF 内嵌元数据，其次首页第一行像标题的文本；仅在元数据缺失时作兜底）。 |
 | `split.py` | `RecursiveCharacterTextSplitter`（中英混排分隔符）+ 每 chunk 元数据 `paper_id/title/page/chunk_index/source`。 |
 | `embeddings.py` | `RetryingEmbeddings`：遇到 `batch size` 类 400 自动**二分拆批**，瞬态错误（429/5xx/超时）指数退避重试。 |
@@ -162,7 +158,7 @@ plan → search_one×N → merge → ingest_one×M → summarize_one×M
 
 ## 6. 编排层
 
-### `pipeline.py` — 可复用流水线（CLI 与 REPL 共用）
+### `pipeline/session.py` — 可复用流水线（CLI 与 REPL 共用）
 
 - `Session` / `build_session()`：持有 Settings、`PaperIndex`、ChatModel；当 embedding 签名与现有索引不符时，自动把 `data_dir` 重定向到 `data/by-embedding/<签名>/`。
 - `ensure_tools()` / `_load_tools_once()`：懒加载并缓存 MCP 工具（`MultiServerMCPClient` 无状态，可跨命令复用）。
@@ -194,22 +190,22 @@ plan → search_one×N → merge → ingest_one×M → summarize_one×M
 
 | 文件 | 原理 |
 |---|---|
-| `report.py` | `render_report()` 把论文/摘要/问答/引用/叙述拼成 Markdown（含对比表、逐篇摘要、参考文献、锚点附录）；`build_bibtex()` 生成 BibTeX；`write_outputs()` 落盘 `.md/.bib/.json`。 |
-| `schema.py` | 全部数据模型：`Paper`/`PaperList`/`coerce_paper`（兼容两种 MCP 返回）、`PaperSummary`、`Citation`、`Answer`、`SelectionItem/Output`、`ResearchState`（图状态，列表字段用 reducer）。 |
-| `utils.py` | 纯函数工具：`normalize_paper_id()`（arXiv/DOI/OpenAlex/链接统一成稳定 key）、`dedupe_papers()`（后到者补空缺字段）、`clean_pasted/clean_secret/mask_secret`（粘贴清洗与脱敏）、`slugify/truncate/safe_filename`（文件名安全化，供 `rag/fetch` 与 `pdf_server` 共用）、`mcp_result_to_text/extract_json/first_list`、`DeterministicFakeEmbeddings`（离线确定性向量）。 |
-| `fake.py` | `FakeToolCallingModel`：实现 `bind_tools`/`with_structured_output`/`_generate`，让 `create_agent` 在离线时也能构建并一步结束。 |
-| `cli.py` | typer 薄封装：`search/ingest/ask/report/rm/channels/providers/keys/embed/mcp-tools/selftest` + `papers-open`/`papers-close`（本地 PDF 预览，可单独跑），只解析参数并调用 `pipeline`/`pdf_server`。 |
+| `pipeline/report.py` | `render_report()` 把论文/摘要/问答/引用/叙述拼成 Markdown（含对比表、逐篇摘要、参考文献、锚点附录）；`build_bibtex()` 生成 BibTeX；`write_outputs()` 落盘 `.md/.bib/.json`。 |
+| `core/schema.py` | 全部数据模型：`Paper`/`PaperList`/`coerce_paper`（兼容两种 MCP 返回）、`PaperSummary`、`Citation`、`Answer`、`SelectionItem/Output`、`ResearchState`（图状态，列表字段用 reducer）。 |
+| `core/utils.py` | 纯函数工具：`normalize_paper_id()`（arXiv/DOI/OpenAlex/链接统一成稳定 key）、`dedupe_papers()`（后到者补空缺字段）、`clean_pasted/clean_secret/mask_secret`（粘贴清洗与脱敏）、`slugify/truncate/safe_filename`（文件名安全化，供 `rag/fetch` 与 `pdf/server` 共用）、`mcp_result_to_text/extract_json/first_list`、`DeterministicFakeEmbeddings`（离线确定性向量）。 |
+| `llm/fake.py` | `FakeToolCallingModel`：实现 `bind_tools`/`with_structured_output`/`_generate`，让 `create_agent` 在离线时也能构建并一步结束。 |
+| `cli.py` | typer 薄封装：`search/ingest/ask/report/rm/channels/providers/keys/embed/mcp-tools/selftest` + `papers-open`/`papers-close`（本地 PDF 预览，可单独跑），只解析参数并调用 `pipeline.session`/`pdf.server`。 |
 | `main.py` | **薄入口**：argparse 定义（`--search/--ingest/--report/--offline/--no-stream/-v`）→ 建 `Repl` → 一次性命令或进 REPL；REPL 本体在包里（见下）。 |
-| `repl.py` | `Repl` 核心：`__init__`（settings/session/config/history）、`banner`、`dispatch`/`safe_dispatch`、`_print_help`、`repl()` 主循环、`status_line`/`palette_context`（补全上下文）、`_run_async`（会话级持久事件循环，避免 `Event loop is closed`）、`_stream_renderer`（append-only 流式）、`_live`/`_stop_live`。本身只继承三个 mixin（`class Repl(SearchCommands, PaperCommands, ProviderCommands)`）。 |
-| `repl_base.py` | `ReplBase`：把混入之间共享的状态（`settings/session/config/history/stream/_live/_loop/_pdf_server`）与核心方法签名集中声明一次（`raise NotImplementedError` 占位），供 mixin 做类型检查——否则 mypy 会在每个 mixin 里各自推断出更窄的类型。 |
-| `repl_search.py` | `SearchCommands`：`/search` `/ingest` `/ask` `/report` `/mcp` `/channels`（含 `add`、渠道失败处理与引导）。 |
-| `repl_papers.py` | `PaperCommands`：`/papers`（列表 / `rm` / `open` / `close`）、`/index`、`/logs`、`/history`、`/save`；本地 PDF 预览服务的生命周期也在这里。 |
-| `repl_providers.py` | `ProviderCommands`：`/connect` `/providers` `/keys` `/models` `/model` `/embed` `/offline`；配置写盘后统一走 `self._rebuild()` 重建会话。 |
-| `repl_ui.py` | 展示层：`COMMANDS`/`COMMAND_USAGE`/`HELP_GROUPS`/`HELP_EXAMPLES`（`/help` 与命令面板补全共用）、`SearchProgressView`（逐渠道进度表）、`setup_readline/save_readline_history`（未装 prompt_toolkit 时的退化输入）、`nullcontext`。 |
-| `ui.py` | 共享 `console`（进程内单例）+ `PROMPT`：`repl*` 与 `main.py` 都从这里取，替换这一个对象就能捕获全部输出（测试就是这么做的）。 |
-| `repl_input.py` | prompt_toolkit 输入层：命令面板补全（含 `--flag`、供应商名、模型名、论文 ID 等上下文补全）、`pick_value()` 可滚动选择器（Enter 选中 / Ctrl+C 设默认 / Ctrl+P 换供应商 / Esc 取消）、主题 `_THEMES`、`read_line()`；未装 prompt_toolkit 时退化为 rich + 标准输入。 |
-| `logging_setup.py` | 日志装配：控制台 handler + **按天分文件** handler。`DailyFileHandler`  写 `logs/paper-agent-YYYY-MM-DD.log`（跨天自动换文件、单日超过 `PAPER_AGENT_LOG_MAX_MB` 续写 `-02`、按「最近 N 天」清理旧文件、重启接着当天最后一段写）；`PAPER_AGENT_LOG_FILE` 则退回固定单文件 + 按大小轮转；`_NoisyFilter` 按**前缀**挡掉 httpx/httpcore(x2)/mcp 等噪声（写死名单拦不住改名包）；`/logs [n] [--files]` 查看。 |
-| `pdf_server.py` | `/papers open` 的本地预览服务：只绑回环地址的 `ThreadingHTTPServer`，`/` 给列表页（可过滤 + 内嵌阅读器 + 底部「停止预览服务」）、`/pdf/<id>` 按 `papers_dir` 文件名映射返回 PDF（支持单段 `Range`/206/416、`?download=1`），校验 `Host` 头防 DNS rebinding；**退出四件套**：页面 `POST /shutdown`（带启动时随机 token）、`/papers close`、`atexit`+`SIGTERM` 收尾、空闲超时（`PAPER_AGENT_PDF_IDLE_MIN`，默认 30 分钟）；启动时把 `{pid,port,url}` 写进 `.paper-agent/pdf-server.json`（陈旧记录会被 pid/端口探测清掉），因此**另一个进程**也能找到并 SIGTERM 停掉它（`stop_registered_server()`）。`start_viewer()` 供 REPL 与 CLI 共用；自动开浏览器用 `open_in_browser()`（逐个试 `$BROWSER`/`xdg-open`/`wslview`/`gio` 等启动器，丢弃输出、失败只提示手动打开，不再像 stdlib `webbrowser` 那样把 `gio: ... Operation not supported` 漏到终端）。 |
+| `repl/app.py` | `Repl` 核心：`__init__`（settings/session/config/history）、`banner`、`dispatch`/`safe_dispatch`、`_print_help`、`repl()` 主循环、`status_line`/`palette_context`（补全上下文）、`_run_async`（会话级持久事件循环，避免 `Event loop is closed`）、`_stream_renderer`（append-only 流式）、`_live`/`_stop_live`。本身只继承三个 mixin（`class Repl(SearchCommands, PaperCommands, ProviderCommands)`）。 |
+| `repl/base.py` | `ReplBase`：把混入之间共享的状态（`settings/session/config/history/stream/_live/_loop/_pdf_server`）与核心方法签名集中声明一次（`raise NotImplementedError` 占位），供 mixin 做类型检查——否则 mypy 会在每个 mixin 里各自推断出更窄的类型。 |
+| `repl/commands/search.py` | `SearchCommands`：`/search` `/ingest` `/ask` `/report` `/mcp` `/channels`（含 `add`、渠道失败处理与引导）。 |
+| `repl/commands/papers.py` | `PaperCommands`：`/papers`（列表 / `rm` / `open` / `close`）、`/index`、`/logs`、`/history`、`/save`；本地 PDF 预览服务的生命周期也在这里。 |
+| `repl/commands/providers.py` | `ProviderCommands`：`/connect` `/providers` `/keys` `/models` `/model` `/embed` `/offline`；配置写盘后统一走 `self._rebuild()` 重建会话。 |
+| `repl/ui.py` | 展示层：`COMMANDS`/`COMMAND_USAGE`/`HELP_GROUPS`/`HELP_EXAMPLES`（`/help` 与命令面板补全共用）、`SearchProgressView`（逐渠道进度表）、`setup_readline/save_readline_history`（未装 prompt_toolkit 时的退化输入）、`nullcontext`。 |
+| `core/ui.py` | 共享 `console`（进程内单例）+ `PROMPT`：`repl/` 各模块与 `main.py` 都从这里取，替换这一个对象就能捕获全部输出（测试就是这么做的）。 |
+| `repl/input.py` | prompt_toolkit 输入层：命令面板补全（含 `--flag`、供应商名、模型名、论文 ID 等上下文补全）、`pick_value()` 可滚动选择器（Enter 选中 / Ctrl+C 设默认 / Ctrl+P 换供应商 / Esc 取消）、主题 `_THEMES`、`read_line()`；未装 prompt_toolkit 时退化为 rich + 标准输入。 |
+| `core/logging.py` | 日志装配：控制台 handler + **按天分文件** handler。`DailyFileHandler`  写 `logs/paper-agent-YYYY-MM-DD.log`（跨天自动换文件、单日超过 `PAPER_AGENT_LOG_MAX_MB` 续写 `-02`、按「最近 N 天」清理旧文件、重启接着当天最后一段写）；`PAPER_AGENT_LOG_FILE` 则退回固定单文件 + 按大小轮转；`_NoisyFilter` 按**前缀**挡掉 httpx/httpcore(x2)/mcp 等噪声（写死名单拦不住改名包）；`/logs [n] [--files]` 查看。 |
+| `pdf/server.py` | `/papers open` 的本地预览服务：只绑回环地址的 `ThreadingHTTPServer`，`/` 给列表页（可过滤 + 内嵌阅读器 + 底部「停止预览服务」）、`/pdf/<id>` 按 `papers_dir` 文件名映射返回 PDF（支持单段 `Range`/206/416、`?download=1`），校验 `Host` 头防 DNS rebinding；**退出四件套**：页面 `POST /shutdown`（带启动时随机 token）、`/papers close`、`atexit`+`SIGTERM` 收尾、空闲超时（`PAPER_AGENT_PDF_IDLE_MIN`，默认 30 分钟）；启动时把 `{pid,port,url}` 写进 `.paper-agent/pdf-server.json`（陈旧记录会被 pid/端口探测清掉），因此**另一个进程**也能找到并 SIGTERM 停掉它（`stop_registered_server()`）。`start_viewer()` 供 REPL 与 CLI 共用；自动开浏览器用 `open_in_browser()`（逐个试 `$BROWSER`/`xdg-open`/`wslview`/`gio` 等启动器，丢弃输出、失败只提示手动打开，不再像 stdlib `webbrowser` 那样把 `gio: ... Operation not supported` 漏到终端）。 |
 
 ---
 
@@ -226,7 +222,7 @@ plan → search_one×N → merge → ingest_one×M → summarize_one×M
 
 ## 9. 测试与离线
 
-- **全部离线可跑**：`FakeToolCallingModel`（`fake.py`）+ `DeterministicFakeEmbeddings`（`utils.py`）+ `tests/fixtures/fake_mcp_server.py`（真实 stdio MCP 协议往返）。
+- **全部离线可跑**：`FakeToolCallingModel`（`llm/fake.py`）+ `DeterministicFakeEmbeddings`（`core/utils.py`）+ `tests/fixtures/fake_mcp_server.py`（真实 stdio MCP 协议往返）。
 - **关闭联网**：`--offline` / `PAPER_AGENT_FAKE_LLM=1` → 假模型 + 假 embedding，并强制使用独立的 `data/offline/` 索引目录（避免维度混用）。
 - 主要测试文件：
   - `test_utils.py` ID 归一化/去重；`test_rag.py` 解析/切分/索引持久化/引用校验；
@@ -241,49 +237,53 @@ plan → search_one×N → merge → ingest_one×M → summarize_one×M
 ## 10. 文件职责速查
 
 ```
-main.py                        薄入口：argparse + 一次性命令分发（REPL 实现见 src/paper_agent/repl*.py）
+main.py                        薄入口：argparse + 一次性命令分发（REPL 实现在 src/paper_agent/repl/）
 src/paper_agent/
-  repl.py                      Repl 核心：命令分发、帮助、主循环、事件循环与流式渲染
-  repl_base.py                 mixin 共享状态 + 核心方法签名（供类型检查）
-  repl_search.py               SearchCommands：/search /ingest /ask /report /mcp /channels
-  repl_papers.py               PaperCommands：/papers /index /logs /history /save + PDF 预览服务
-  repl_providers.py            ProviderCommands：/connect /providers /keys /models /model /embed /offline
-  repl_ui.py                   命令表/帮助分组、检索进度视图、readline 历史
-  ui.py                        共享 console + 提示符
-  config.py                    pydantic-settings 全局配置 + 源/路径派生属性
-  logging_setup.py             日志落盘：按天分文件 logs/paper-agent-YYYY-MM-DD.log（保留 N 天）+ 控制台 handler
-  pdf_server.py                本地 PDF 预览：回环 HTTP 服务 + 列表页（`/papers open`）
-  llm.py                       聊天/embedding 模型工厂（供应商优先级、thinking、重试）
-  userconfig.py                供应商 JSON 配置：识别/读写/模型分类/注入 Settings
-  tui.py                       /connect 流程、密钥读取、模型列表同步
-  repl_input.py                prompt_toolkit 补全与选择器、主题、read_line
-  channels.py                  渠道注册表（元数据、分组、国内优先、预设编号）
-  sources.py                   内置 HTTP 检索：arXiv/OpenAlex/Crossref + 可配置渠道 + 按 ID 直抓（429 降级直链）
-  search_llm.py                检索用 LLM：查询扩展 + 相关性重排（可降级）
-  mcp_client.py                MCP 接入：server 加载、工具白名单/源收敛/参数护栏/文本化
-  mcp_servers.json             MCP server 模板（stdio / streamable_http）
-  mcp_quiet/sitecustomize.py   静音 MCP 子进程的第三方日志
-  pipeline.py                  可复用流水线：搜索/入库/问答/报告 + 复读保护
-  report.py                    Markdown / BibTeX / JSON 渲染与落盘
-  schema.py                    数据模型与图状态
-  utils.py                     ID 归一化、去重、粘贴清洗、文件名安全化、JSON 抽取、假 embedding
-  fake.py                      离线假模型
+  __main__.py                  `python -m src.paper_agent` 入口 → cli.py
   cli.py                       typer 子命令（薄封装 pipeline；+ papers-open/papers-close 独立起/停预览）
-  rag/fetch.py                 OA PDF 下载与本地缓存
-  rag/parse.py                 pymupdf→pdfplumber 解析与清洗
-  rag/split.py                 切分与元数据
-  rag/embeddings.py            重试 + 自动降批的 Embeddings 包装
-  rag/store.py                 向量索引 + manifest + 签名校验
-  rag/retriever.py             检索、引用锚点、引用校验
-  tools/paper_tools.py         确定性入库 + 索引查询工具
-  tools/rag_tools.py           search_corpus / read_chunk 工具
-  agents/common.py             结构化结果/AI 文本提取
-  agents/prompts.py            各角色提示词
-  agents/search_agent.py       检索 agent + 直接调用 MCP 的降级路径
-  agents/summarize_agent.py    单篇精读 agent + 摘要兜底
-  agents/rag_agent.py          带引用问答 agent + 纯文本/离线兜底
-  agents/writer_agent.py       报告写作 agent
-  agents/supervisor.py         LangGraph 监督图与 simple 模式
+  core/                        基础设施层（无业务逻辑，被各层复用）
+    config.py                  pydantic-settings 全局配置 + 源/路径派生属性
+    logging.py                 日志落盘：按天分文件 logs/paper-agent-YYYY-MM-DD.log（保留 N 天）+ 控制台 handler
+    schema.py                  数据模型与图状态
+    utils.py                   ID 归一化、去重、粘贴清洗、文件名安全化、JSON 抽取、假 embedding
+    ui.py                      共享 console + 提示符
+  sources/                     来源层（渠道 / 抓取 / MCP / 供应商凭证）
+    channels.py                渠道注册表（元数据、分组、国内优先、预设编号）
+    fetchers.py                内置 HTTP 检索：arXiv/OpenAlex/Crossref + 可配置渠道 + 按 ID 直抓（429 降级直链）
+    mcp.py                     MCP 接入：server 加载、工具白名单/源收敛/参数护栏/文本化
+    userconfig.py              供应商 JSON 配置：识别/读写/模型分类/注入 Settings
+    mcp_servers.json           MCP server 模板（stdio / streamable_http）
+    mcp_quiet/sitecustomize.py 静音 MCP 子进程的第三方日志
+  llm/                         模型层
+    factory.py                 聊天/embedding 模型工厂（供应商优先级、thinking、重试）
+    search.py                  检索用 LLM：查询扩展 + 相关性重排（可降级）
+    fake.py                    离线假模型
+  rag/                         RAG 层
+    fetch.py / parse.py / split.py / embeddings.py / store.py / retriever.py
+  tools/                       工具层
+    paper_tools.py             确定性入库 + 索引查询工具
+    rag_tools.py               search_corpus / read_chunk 工具
+  agents/                      Agent 层
+    common.py / prompts.py    结构化结果提取、各角色提示词
+    search_agent.py            检索 agent + 直接调用 MCP 的降级路径
+    summarize_agent.py         单篇精读 agent + 摘要兜底
+    rag_agent.py               带引用问答 agent + 纯文本/离线兜底
+    writer_agent.py            报告写作 agent
+    supervisor.py              LangGraph 监督图与 simple 模式
+  pipeline/                    编排层
+    session.py                 可复用流水线：搜索/入库/问答/报告 + 复读保护
+    report.py                  Markdown / BibTeX / JSON 渲染与落盘
+  pdf/
+    server.py                  本地 PDF 预览：回环 HTTP 服务 + 列表页（`/papers open`）
+  repl/                        交互层
+    app.py                     Repl 核心：命令分发、帮助、主循环、事件循环与流式渲染
+    base.py                    mixin 共享状态 + 核心方法签名（供类型检查）
+    commands/search.py         SearchCommands：/search /ingest /ask /report /mcp /channels
+    commands/papers.py         PaperCommands：/papers /index /logs /history /save + PDF 预览服务
+    commands/providers.py      ProviderCommands：/connect /providers /keys /models /model /embed /offline
+    ui.py                      命令表/帮助分组、检索进度视图、readline 历史
+    input.py                   prompt_toolkit 补全与选择器、主题、read_line
+    tui.py                     /connect 流程、密钥读取、模型列表同步
 docs/history/PLAN.md           设计与演进记录（历史文档）
 docs/ARCHITECTURE.md           本文
 ```

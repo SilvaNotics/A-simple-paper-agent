@@ -9,8 +9,8 @@ from dataclasses import dataclass, field
 
 from langchain_core.documents import Document
 
-from ..schema import Answer, Citation
-from ..utils import truncate
+from ..core.schema import Answer, Citation
+from ..core.utils import truncate
 from .store import PaperIndex
 
 logger = logging.getLogger(__name__)
@@ -320,7 +320,7 @@ def retrieve_across_papers(
     跨篇归纳若引用全来自同一篇论文，结论会严重偏置；这里按论文配额检索后去重合并，
     总片段数上限 = top_k + 论文数。
     """
-    from ..config import get_settings
+    from ..core.config import get_settings
 
     s = settings or get_settings()
     if not paper_ids:

@@ -13,7 +13,7 @@ from typing import Any
 from langchain_openai import ChatOpenAI, OpenAIEmbeddings
 from pydantic import SecretStr
 
-from .config import Settings, get_settings
+from ..core.config import Settings, get_settings
 
 # 角色 -> temperature。检索/抽取类任务要稳定，写作类允许一点多样性。
 _ROLE_TEMPERATURE: dict[str, float] = {
@@ -122,11 +122,11 @@ def get_embeddings(settings: Settings | None = None, **kwargs: Any):
     s = settings or get_settings()
 
     if s.fake_llm:
-        from .utils import DeterministicFakeEmbeddings
+        from ..core.utils import DeterministicFakeEmbeddings
 
         return DeterministicFakeEmbeddings(dim=64)
 
-    from .rag.embeddings import RetryingEmbeddings
+    from ..rag.embeddings import RetryingEmbeddings
 
     def _generic_embeddings(base_url: str, api_key: SecretStr, model: str):
         base = OpenAIEmbeddings(

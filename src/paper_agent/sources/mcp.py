@@ -20,8 +20,8 @@ from typing import TYPE_CHECKING, Any, cast
 
 from langchain_core.tools import BaseTool
 
-from .config import MCP_SOURCE_KINDS, Settings, get_settings
-from .utils import mcp_result_to_text
+from ..core.config import MCP_SOURCE_KINDS, Settings, get_settings
+from ..core.utils import mcp_result_to_text
 
 if TYPE_CHECKING:  # 仅用于类型标注，运行时不导入
     from langchain_mcp_adapters.sessions import (

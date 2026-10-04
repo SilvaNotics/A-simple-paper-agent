@@ -18,14 +18,14 @@ import sys
 from dataclasses import dataclass, field
 from typing import Callable
 
-from .config import PTK_HISTORY_FILE
+from ..core.config import PTK_HISTORY_FILE
 
 logger = logging.getLogger(__name__)
 
 # 渠道类型（给 `/channels add` / `/keys rm channel:` 补全用）
 try:  # 避免任何导入异常影响输入层
-    from .channels import PRESET_ORDER as CHANNEL_KINDS
-    from .channels import REGISTRY as _CHANNEL_REGISTRY
+    from ..sources.channels import PRESET_ORDER as CHANNEL_KINDS
+    from ..sources.channels import REGISTRY as _CHANNEL_REGISTRY
 
     CHANNEL_KINDS = [*CHANNEL_KINDS, *_CHANNEL_REGISTRY.keys()]
 except Exception:  # noqa: BLE001  # pragma: no cover
@@ -489,7 +489,7 @@ def _numbered_fallback(
     from rich.table import Table
     from rich.text import Text
 
-    from .utils import clean_pasted
+    from ..core.utils import clean_pasted
 
     matches = list(values)
     while True:

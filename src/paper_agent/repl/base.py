@@ -13,10 +13,10 @@ from typing import Any, Callable
 
 from rich.live import Live
 
-from .config import Settings
-from .pdf_server import PdfServer
-from .pipeline import Session
-from .userconfig import UserConfig
+from ..core.config import Settings
+from ..pdf.server import PdfServer
+from ..pipeline.session import Session
+from ..sources.userconfig import UserConfig
 
 
 class ReplBase:

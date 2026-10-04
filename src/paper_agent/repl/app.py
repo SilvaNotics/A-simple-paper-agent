@@ -1,7 +1,7 @@
 # -*- coding: utf-8 -*-
 """Repl 核心：会话状态、命令分发与帮助、REPL 主循环、事件循环与流式渲染。
 
-命令实现按域拆到三个 mixin（`repl_search` / `repl_papers` / `repl_providers`），
+命令实现按域拆到三个 mixin（`commands/search.py` / `commands/papers.py` / `commands/providers.py`），
 与本类合成同一个 `Repl`：方法之间可以互相调用（`self.cmd_*` / `self._helper`）。
 共享状态都在 `__init__` 里建立：`settings` / `session` / `config` / `history` /
 `stream` / `_live` / `_loop` / `_pdf_server`；输出统一走 `ui.console`。
@@ -19,12 +19,12 @@ from rich.panel import Panel
 from rich.table import Table
 from rich.text import Text
 
-from . import ui
-from .cli import cli_settings
-from .pdf_server import PdfServer
-from .pipeline import Session, build_session
-from .repl_input import PaletteContext, create_session, read_line
-from .repl_ui import (
+from ..core import ui
+from ..cli import cli_settings
+from ..pdf.server import PdfServer
+from ..pipeline.session import Session, build_session
+from .input import PaletteContext, create_session, read_line
+from .ui import (
     COMMANDS,
     COMMAND_USAGE,
     HELP_EXAMPLES,
@@ -32,11 +32,11 @@ from .repl_ui import (
     save_readline_history,
     setup_readline,
 )
-from .userconfig import UserConfig
+from ..sources.userconfig import UserConfig
 
-from .repl_papers import PaperCommands
-from .repl_providers import ProviderCommands
-from .repl_search import SearchCommands
+from .commands.papers import PaperCommands
+from .commands.providers import ProviderCommands
+from .commands.search import SearchCommands
 
 
 class Repl(SearchCommands, PaperCommands, ProviderCommands):

@@ -16,9 +16,11 @@
 **所有渠道默认禁用**，用 `/channels add <编号|kind>` 添加后才参与检索。
 `/channels` 可添加 Semantic Scholar/CORE/Tavily 及国内库（ChinaXiv/国家图书馆免 key，百度学术/万方需 key）。
 
-本文件只做「入口」：解析参数 → 交给 `src/paper_agent/repl.py` 的 `Repl`。
-REPL 的实现在包里按域拆开：`repl.py`（核心） / `repl_search.py` / `repl_papers.py` /
-`repl_providers.py`（命令）/ `repl_ui.py`（命令表与进度视图）/ `ui.py`（共享 console）。
+本文件只做「入口」：解析参数 → 交给 `src/paper_agent/repl/` 的 `Repl`。
+REPL 的实现在包里按域拆开：`repl/app.py`（核心） / `repl/commands/*.py`（命令） /
+`repl/ui.py`（命令表与进度视图） / `repl/input.py`（补全） / `core/ui.py`（共享 console）。
+其他层次：`pipeline/`（检索→入库→报告）/ `sources/`（渠道·抓取·MCP）/ `llm/`（模型） /
+`rag/`、`agents/`、`tools/`、`pdf/`、`core/`。
 """
 
 from __future__ import annotations
@@ -33,13 +35,13 @@ ROOT = Path(__file__).resolve().parent
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
-from src.paper_agent.logging_setup import setup_logging  # noqa: E402
+from src.paper_agent.core.logging import setup_logging  # noqa: E402
 from src.paper_agent.repl import Repl  # noqa: E402
-from src.paper_agent.repl_ui import save_readline_history  # noqa: E402
+from src.paper_agent.repl.ui import save_readline_history  # noqa: E402
 
 
 def _setup_logging(verbose: bool) -> None:
-    """配置日志：控制台 + 项目内按天文件（见 `logging_setup`）。
+    """配置日志：控制台 + 项目内按天文件（见 `core/logging.py`）。
 
     REPL 控制台默认只显示 WARNING（`-v` 显示 DEBUG），但文件始终按 DEBUG 记录，
     方便事后用 `/logs` 或直接看文件排查。

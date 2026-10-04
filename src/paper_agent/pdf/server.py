@@ -44,8 +44,8 @@ from pathlib import Path
 from typing import Any
 from urllib.parse import parse_qs, quote, unquote, urlparse
 
-from .config import STATE_DIR
-from .utils import safe_filename
+from ..core.config import STATE_DIR
+from ..core.utils import safe_filename
 
 logger = logging.getLogger(__name__)
 
@@ -876,7 +876,7 @@ def start_viewer(
 
     REPL（`/papers open`）与 CLI（`papers-open`）共用，保证两边的提示与退出行为一致。
     """
-    from . import ui
+    from ..core import ui
 
     out = console or ui.console
     server = PdfServer(entries, papers_dir=papers_dir, host=host, port=port, idle_seconds=idle_seconds)

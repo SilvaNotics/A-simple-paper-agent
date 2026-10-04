@@ -11,8 +11,8 @@ from langchain.agents import create_agent
 from langchain_core.language_models import BaseChatModel
 from langchain_core.tools import BaseTool
 
-from ..schema import Paper, PaperList, coerce_paper
-from ..utils import extract_json, first_list, mcp_result_to_text
+from ..core.schema import Paper, PaperList, coerce_paper
+from ..core.utils import extract_json, first_list, mcp_result_to_text
 from . import prompts
 from .common import result_text, structured_response
 

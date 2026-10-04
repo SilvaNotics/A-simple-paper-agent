@@ -15,9 +15,9 @@ import asyncio
 import logging
 from typing import Any
 
-from .config import Settings, get_settings
-from .schema import Paper
-from .utils import extract_json, first_list, truncate
+from ..core.config import Settings, get_settings
+from ..core.schema import Paper
+from ..core.utils import extract_json, first_list, truncate
 
 logger = logging.getLogger(__name__)
 

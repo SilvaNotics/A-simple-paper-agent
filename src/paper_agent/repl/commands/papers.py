@@ -16,9 +16,9 @@ from rich.panel import Panel
 from rich.table import Table
 from rich.text import Text
 
-from . import ui
-from .config import resolve_path
-from .logging_setup import (
+from ...core import ui
+from ...core.config import resolve_path
+from ...core.logging import (
     backup_count,
     keep_days,
     list_log_files,
@@ -29,18 +29,18 @@ from .logging_setup import (
     resolve_log_file,
     tail_log,
 )
-from .pdf_server import (
+from ...pdf.server import (
     DEFAULT_PORT as PDF_DEFAULT_PORT,
     collect_pdf_entries,
     registered_server,
     start_viewer,
     stop_registered_server,
 )
-from .pipeline import collapse_repetition, remove_papers as pipeline_remove_papers
-from .tui import ask_line, pick_from_list
-from .utils import clean_pasted, flag_bool, split_args
+from ...pipeline.session import collapse_repetition, remove_papers as pipeline_remove_papers
+from ..tui import ask_line, pick_from_list
+from ...core.utils import clean_pasted, flag_bool, split_args
 
-from .repl_base import ReplBase
+from ..base import ReplBase
 
 
 class PaperCommands(ReplBase):

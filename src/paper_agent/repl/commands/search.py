@@ -16,17 +16,17 @@ from rich.live import Live
 from rich.markdown import Markdown
 from rich.table import Table
 
-from . import ui
-from .channels import channel_label, is_domestic, presets as channel_presets, spec_for
-from .cli import papers_table
-from .config import get_settings
-from .pipeline import ask as pipeline_ask, ingest_papers, run_ingest, run_report, run_search
-from .repl_ui import SearchProgressView, nullcontext
-from .tui import ask_line, read_secret
-from .userconfig import UserConfig
-from .utils import clean_pasted, flag_bool, split_args
+from ...core import ui
+from ...sources.channels import channel_label, is_domestic, presets as channel_presets, spec_for
+from ...cli import papers_table
+from ...core.config import get_settings
+from ...pipeline.session import ask as pipeline_ask, ingest_papers, run_ingest, run_report, run_search
+from ..ui import SearchProgressView, nullcontext
+from ..tui import ask_line, read_secret
+from ...sources.userconfig import UserConfig
+from ...core.utils import clean_pasted, flag_bool, split_args
 
-from .repl_base import ReplBase
+from ..base import ReplBase
 
 
 class SearchCommands(ReplBase):
@@ -295,7 +295,7 @@ class SearchCommands(ReplBase):
         ui.console.print("[dim]用 /save 保存会话，或直接用编辑器查看生成的 md[/dim]")
 
     def cmd_mcp(self) -> None:
-        from src.paper_agent.mcp_client import describe_mcp_tools, load_server_specs
+        from src.paper_agent.sources.mcp import describe_mcp_tools, load_server_specs
 
         specs = load_server_specs(self.settings)
         if not specs:

@@ -8,7 +8,7 @@
 - 旧版 `~/.config/paper-agent/config.json` 自动迁移到项目内（见 `_migrate_legacy_config`）；
 - 按 base URL 自动识别供应商类型，据此决定少量差异化行为与推荐模型；
 - 自动拉取 `/models` 并分类（chat / embedding），供 `/models` 切换；
-- `apply_to(settings)` 把当前供应商 + 默认模型注入 `Settings`，`llm.py` 优先使用。
+- `apply_to(settings)` 把当前供应商 + 默认模型注入 `Settings`，`llm/factory.py` 优先使用。
 """
 
 from __future__ import annotations
@@ -26,8 +26,8 @@ import httpx
 from pydantic import SecretStr
 
 from .channels import channel_label, default_base_url, spec_for
-from .config import STATE_DIR, Settings, resolve_path
-from .utils import clean_pasted, clean_secret, mask_secret
+from ..core.config import STATE_DIR, Settings, resolve_path
+from ..core.utils import clean_pasted, clean_secret, mask_secret
 
 logger = logging.getLogger(__name__)
 

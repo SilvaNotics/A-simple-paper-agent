@@ -18,8 +18,8 @@ from langchain_core.documents import Document
 from langchain_core.embeddings import Embeddings
 from langchain_core.vectorstores import InMemoryVectorStore
 
-from ..config import Settings, get_settings
-from ..schema import Paper
+from ..core.config import Settings, get_settings
+from ..core.schema import Paper
 
 logger = logging.getLogger(__name__)
 

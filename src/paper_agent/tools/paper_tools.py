@@ -11,13 +11,13 @@ from typing import Any
 
 from langchain_core.tools import BaseTool, tool
 
-from ..config import Settings, get_settings
+from ..core.config import Settings, get_settings
 from ..rag.fetch import download_pdf
 from ..rag.parse import parse_pdf
 from ..rag.split import split_paper
 from ..rag.store import PaperIndex
-from ..schema import Paper
-from ..utils import truncate as truncate_text
+from ..core.schema import Paper
+from ..core.utils import truncate as truncate_text
 
 logger = logging.getLogger(__name__)
 

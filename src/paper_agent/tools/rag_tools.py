@@ -5,7 +5,7 @@ from __future__ import annotations
 
 from langchain_core.tools import BaseTool, tool
 
-from ..config import Settings, get_settings
+from ..core.config import Settings, get_settings
 from ..rag.retriever import CitationCollector, format_context, retrieve
 from ..rag.store import PaperIndex
 

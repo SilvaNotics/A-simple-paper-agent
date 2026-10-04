@@ -10,8 +10,8 @@ from langchain.agents import create_agent
 from langchain_core.language_models import BaseChatModel
 from langchain_core.tools import BaseTool
 
-from ..schema import Answer
-from ..utils import extract_json
+from ..core.schema import Answer
+from ..core.utils import extract_json
 from . import prompts
 from .common import result_text, structured_response
 
@@ -97,7 +97,7 @@ async def run_rag_agent(
 
         # 无结构化输出（已不用 response_format）：取最后一条 AI 消息正文，再解析锚点
         from .common import last_ai_text
-        from ..pipeline import clean_stream_output, collapse_repetition
+        from ..pipeline.session import clean_stream_output, collapse_repetition
 
         text = clean_stream_output(collapse_repetition(last_ai_text(result))).strip()
         if text:

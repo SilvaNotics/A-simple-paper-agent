@@ -1,8 +1,8 @@
 # -*- coding: utf-8 -*-
 """REPL 的展示层：命令表（`/help` 与补全共用）、检索进度视图、readline 历史。
 
-这里只放**不依赖会话状态**的东西：`Repl`（`repl.py`）与 `main.py` 都从这里取命令表，
-`repl_input.create_session()` 用 `COMMANDS` 做命令面板补全。
+这里只放**不依赖会话状态**的东西：`Repl`（`repl/app.py`）与 `main.py` 都从这里取命令表，
+`repl/input.py` 的 `create_session()` 用 `COMMANDS` 做命令面板补全。
 """
 
 from __future__ import annotations
@@ -12,8 +12,8 @@ from typing import Any, Literal
 from rich.table import Table
 from rich.text import Text
 
-from .channels import is_domestic
-from .config import HISTORY_FILE
+from ..sources.channels import is_domestic
+from ..core.config import HISTORY_FILE
 
 # --------------------------------------------------------------------------
 # 命令表（命令名 → 一句话说明 + 用法签名）
@@ -126,7 +126,7 @@ def setup_readline() -> None:
 
 def _readline_options(line: str, text: str) -> list[str]:
     """readline Tab 补全的候选项（与 prompt_toolkit 命令面板同一份命令/参数表）。"""
-    from .repl_input import COMMAND_FLAGS
+    from .input import COMMAND_FLAGS
 
     head, _, _tail = line.partition(" ")
     if " " in line:

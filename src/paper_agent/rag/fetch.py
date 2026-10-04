@@ -11,9 +11,9 @@ from pathlib import Path
 
 import httpx
 
-from ..config import Settings, get_settings
-from ..schema import Paper
-from ..utils import safe_filename
+from ..core.config import Settings, get_settings
+from ..core.schema import Paper
+from ..core.utils import safe_filename
 
 logger = logging.getLogger(__name__)
 

@@ -7,9 +7,9 @@ import json
 from datetime import datetime
 from pathlib import Path
 
-from .config import Settings, get_settings
-from .schema import Answer, Citation, Paper, PaperSummary
-from .utils import slugify, truncate
+from ..core.config import Settings, get_settings
+from ..core.schema import Answer, Citation, Paper, PaperSummary
+from ..core.utils import slugify, truncate
 
 
 def _authors_bibtex(authors: str) -> str:

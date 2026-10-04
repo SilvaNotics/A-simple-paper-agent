@@ -6,8 +6,8 @@ from __future__ import annotations
 from langchain_core.documents import Document
 from langchain_text_splitters import RecursiveCharacterTextSplitter
 
-from ..config import Settings, get_settings
-from ..schema import Paper
+from ..core.config import Settings, get_settings
+from ..core.schema import Paper
 from .parse import ParsedDoc
 
 # 中英混排论文的切分优先级

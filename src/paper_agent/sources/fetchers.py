@@ -22,9 +22,9 @@ from urllib.parse import quote
 import httpx
 
 from .channels import domestic_first, is_domestic, spec_for
-from .config import Settings, get_settings
-from .schema import Paper
-from .utils import clean_pasted, first_list, normalize_paper_id
+from ..core.config import Settings, get_settings
+from ..core.schema import Paper
+from ..core.utils import clean_pasted, first_list, normalize_paper_id
 
 logger = logging.getLogger(__name__)
 

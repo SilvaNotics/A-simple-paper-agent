@@ -27,8 +27,8 @@ from .rag_agent import make_rag_agent, run_rag_agent
 from .search_agent import direct_search, make_search_agent, run_search_agent
 from .summarize_agent import make_summarize_agent, run_summarize_agent
 from .writer_agent import make_writer_agent, material_from_state, run_writer_agent
-from ..config import Settings, get_settings
-from ..llm import get_chat_model, get_embeddings
+from ..core.config import Settings, get_settings
+from ..llm.factory import get_chat_model, get_embeddings
 from ..rag.retriever import (
     CitationCollector,
     retrieve_across_papers,
@@ -38,15 +38,15 @@ from ..rag.retriever import (
     verify_report_citations,
 )
 from ..rag.store import PaperIndex
-from ..report import build_bibtex, render_report
-from ..schema import (
+from ..pipeline.report import build_bibtex, render_report
+from ..core.schema import (
     Paper,
     ResearchState,
     SelectionOutput,
 )
 from ..tools.paper_tools import ingest_paper, make_paper_tools
 from ..tools.rag_tools import make_rag_tools
-from ..utils import dedupe_papers, extract_json, first_list, truncate
+from ..core.utils import dedupe_papers, extract_json, first_list, truncate
 
 logger = logging.getLogger(__name__)
 
@@ -147,7 +147,7 @@ def make_search_one_node(deps: Deps):
     limit = max(3, deps.settings.max_papers)
 
     async def _builtin(query: str) -> tuple[list[Paper], str]:
-        from ..sources import builtin_search  # noqa: PLC0415  (延迟导入，避免循环依赖)
+        from ..sources.fetchers import builtin_search  # noqa: PLC0415  (延迟导入，避免循环依赖)
 
         return await builtin_search(query, limit, deps.settings)
 
@@ -647,7 +647,7 @@ async def build_app(
     s = settings or get_settings()
     if search_tools is None:
         try:
-            from ..mcp_client import load_mcp_tools
+            from ..sources.mcp import load_mcp_tools
 
             search_tools = await load_mcp_tools(s)
         except Exception as exc:  # noqa: BLE001
@@ -681,7 +681,7 @@ async def build_simple_app(
     idx = index if index is not None else PaperIndex.load_or_create(emb, s)
     tools = list(search_tools or [])
     if tools is None or not tools:
-        from ..mcp_client import load_mcp_tools
+        from ..sources.mcp import load_mcp_tools
 
         tools = await load_mcp_tools(s)
 

@@ -148,7 +148,30 @@ python -m src.paper_agent embed dashscope --model text-embedding-v4
 
 抓取顺序：`--source auto`（默认）= MCP 优先，不可用/无结果回退内置 HTTP；`mcp` / `builtin` / `all`（两者合并）。
 
-## 常用参数（环境变量 / `config.py`）
+## 项目结构
+
+代码按「基础设施 → 领域 → 编排 → 入口」分层，`src/paper_agent/` 下每层一个子包（各文件职责见 [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md)）：
+
+```
+main.py                  交互式入口（REPL / 一次性命令）
+src/paper_agent/
+  __main__.py            `python -m src.paper_agent` 入口
+  cli.py                 typer 子命令入口
+  core/                  基础设施：config / logging / schema / utils / ui
+  sources/               来源层：channels（渠道）/ fetchers（内置抓取）/ mcp / userconfig（凭证）
+  llm/                   模型层：factory（ChatModel·Embeddings）/ search（查询扩展·重排）/ fake
+  rag/                   RAG：fetch / parse / split / embeddings / store / retriever
+  tools/                 agent 工具：paper_tools / rag_tools
+  agents/                多 agent：search / summarize / rag / writer / supervisor（LangGraph）
+  pipeline/              编排层：session（可复用流水线）/ report（Markdown·BibTeX·JSON）
+  pdf/                   本地 PDF 预览服务
+  repl/                  交互层：app（Repl）/ commands/* / input / ui / tui / base
+```
+
+- 只有 `main.py`、`cli.py`、`__main__.py` 在包根，其余按层归入子包；跨层引用一律写全路径（如 `from ..pipeline.session import ask`）。
+- `pipeline/session.py` 是唯一业务入口：REPL 与 CLI 都只调它，保证行为一致。
+
+## 常用参数（环境变量 / `core/config.py`）
 
 | 变量 | 默认 | 说明 |
 |---|---|---|
@@ -171,7 +194,7 @@ python -m src.paper_agent embed dashscope --model text-embedding-v4
 ## 测试
 
 ```bash
-python -m pytest          # 422 passed，全部离线（假模型 / 假 embedding / 假 MCP server）
+python -m pytest          # 428 passed，全部离线（假模型 / 假 embedding / 假 MCP server）
 python -m mypy src main.py
 ```
 

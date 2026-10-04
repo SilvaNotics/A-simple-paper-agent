@@ -18,10 +18,10 @@ from rich.console import Console
 from rich.markdown import Markdown
 from rich.table import Table
 
-from .config import Settings, get_settings
-from .logging_setup import resolve_log_file, setup_logging
-from .pdf_server import DEFAULT_PORT as PDF_DEFAULT_PORT
-from .pdf_server import collect_pdf_entries, registered_server, start_viewer, stop_registered_server
+from .core.config import Settings, get_settings
+from .core.logging import resolve_log_file, setup_logging
+from .pdf.server import DEFAULT_PORT as PDF_DEFAULT_PORT
+from .pdf.server import collect_pdf_entries, registered_server, start_viewer, stop_registered_server
 
 app = typer.Typer(
     add_completion=False,
@@ -31,7 +31,7 @@ console = Console()
 
 
 def _setup_logging(verbose: bool) -> None:
-    """配置日志：控制台 + **项目内**轮转文件 `logs/paper-agent.log`（见 logging_setup）。
+    """配置日志：控制台 + **项目内**轮转文件 `logs/paper-agent.log`（见 `core/logging.py`）。
 
     CLI 控制台默认 INFO（`-v` 为 DEBUG），文件始终按 DEBUG 记录，便于事后排查。
     """
@@ -102,7 +102,7 @@ def search(
     例：python -m src.paper_agent search "graph rag" --ingest 3
     """
     _setup_logging(verbose)
-    from .pipeline import build_session, ingest_papers, run_search
+    from .pipeline.session import build_session, ingest_papers, run_search
 
     session = build_session(cli_settings())
     papers, route = _run(
@@ -154,7 +154,7 @@ def ingest(
       python -m src.paper_agent ingest --ids arxiv:2405.16506,10.1145/3626772.3657775
     """
     _setup_logging(verbose)
-    from .pipeline import build_session, run_ingest
+    from .pipeline.session import build_session, run_ingest
 
     if not (query or ids):
         console.print("[yellow]请给出检索词，或用 --ids 指定要抓取的论文[/yellow]")
@@ -194,8 +194,8 @@ def ask(
 ) -> None:
     """在已入库语料上带引用问答。"""
     _setup_logging(verbose)
-    from .pipeline import ask as ask_pipeline
-    from .pipeline import build_session
+    from .pipeline.session import ask as ask_pipeline
+    from .pipeline.session import build_session
 
     session = build_session(cli_settings(offline=offline))
     try:
@@ -236,7 +236,7 @@ def report(
 ) -> None:
     """端到端：检索 → 入库 → 逐篇精读 → 跨篇归纳 → 出报告（md/bib/json）。"""
     _setup_logging(verbose)
-    from .pipeline import build_session, run_report
+    from .pipeline.session import build_session, run_report
 
     settings = cli_settings(offline=offline, out=out, max_papers=papers or None)
     if source:
@@ -273,7 +273,7 @@ def rm(
     offline: bool = typer.Option(False, "--offline", help="使用 data/offline 独立索引"),
 ) -> None:
     """从 RAG 索引中删除论文（默认同时删掉本地 PDF 缓存）。"""
-    from .pipeline import build_session, remove_papers
+    from .pipeline.session import build_session, remove_papers
 
     session = build_session(cli_settings(offline=offline))
     target = ids.strip()
@@ -300,8 +300,8 @@ def channels(
     channel_name: str = typer.Option("", "--name", help="自定义渠道名（默认用 kind）"),
 ) -> None:
     """搜索渠道配置（像 /connect 配置模型供应商一样，密钥只存本地 JSON）。"""
-    from .channels import channel_label, presets, spec_for
-    from .userconfig import UserConfig
+    from .sources.channels import channel_label, presets, spec_for
+    from .sources.userconfig import UserConfig
 
     config = UserConfig.load()
     action = (action or "list").lower()
@@ -393,8 +393,8 @@ def providers(
     name: str = typer.Argument("", help="供应商名（use/rm/key-rm/sync 用）"),
 ) -> None:
     """管理模型供应商：查看 / 切换默认 / 删除 / 只删 key / 重新拉模型。"""
-    from .tui import _sync_models, print_presets
-    from .userconfig import UserConfig
+    from .repl.tui import _sync_models, print_presets
+    from .sources.userconfig import UserConfig
 
     config = UserConfig.load()
     act = (action or "list").lower()
@@ -447,7 +447,7 @@ def embed(
     auto: bool = typer.Option(False, "--auto", help="改回自动挑选（对话供应商 → 默认 → 第一个带 embedding 的）"),
 ) -> None:
     """单独设置负责 RAG embedding（建索引用）的供应商与模型。"""
-    from .userconfig import UserConfig, resolve_embedding
+    from .sources.userconfig import UserConfig, resolve_embedding
 
     config = UserConfig.load()
     if auto:
@@ -479,7 +479,7 @@ def keys(
     rm: str = typer.Option("", "--rm", help="删除指定 key：provider:<name> | channel:<name> | <name>"),
 ) -> None:
     """查看并删除模型供应商 / 搜索渠道的 API key（只删 key，保留配置）。"""
-    from .userconfig import UserConfig
+    from .sources.userconfig import UserConfig
 
     config = UserConfig.load()
     if rm:
@@ -600,7 +600,7 @@ def mcp_tools(
 ) -> None:
     """列出可用的 MCP server 与（白名单过滤后的）工具。"""
     _setup_logging(verbose)
-    from .mcp_client import build_client, describe_mcp_tools, filter_tools, load_server_specs
+    from .sources.mcp import build_client, describe_mcp_tools, filter_tools, load_server_specs
 
     specs = load_server_specs()
     if not specs:
@@ -640,7 +640,7 @@ def mcp_tools(
 def selftest(verbose: bool = typer.Option(False, "--verbose", "-v")) -> None:
     """检查配置 / 模型 / embedding 是否就绪。"""
     _setup_logging(verbose)
-    from .llm import get_chat_model, get_embeddings
+    from .llm.factory import get_chat_model, get_embeddings
 
     s = get_settings()
     console.print(f"[bold]配置[/bold] model={s.qwen_model} embedding={s.embedding_model} fake_llm={s.fake_llm}")

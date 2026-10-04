@@ -10,15 +10,15 @@ from __future__ import annotations
 from rich.panel import Panel
 from rich.table import Table
 
-from . import ui
-from .cli import cli_settings
-from .config import get_settings
-from .pipeline import build_session
-from .tui import ask_line, connect_flow, embed_models_for, pick_from_list, print_presets
-from .userconfig import UserConfig, probe_embedding_dim, resolve_embedding, settings_overrides
-from .utils import clean_pasted, flag_bool, mask_secret, split_args
+from ...core import ui
+from ...cli import cli_settings
+from ...core.config import get_settings
+from ...pipeline.session import build_session
+from ..tui import ask_line, connect_flow, embed_models_for, pick_from_list, print_presets
+from ...sources.userconfig import UserConfig, probe_embedding_dim, resolve_embedding, settings_overrides
+from ...core.utils import clean_pasted, flag_bool, mask_secret, split_args
 
-from .repl_base import ReplBase
+from ..base import ReplBase
 
 
 class ProviderCommands(ReplBase):
@@ -145,7 +145,7 @@ class ProviderCommands(ReplBase):
 
         want_embedding = flag_bool(flags, "embedding")
         if flag_bool(flags, "refresh") or (not provider.models and not provider.chat_models):
-            from src.paper_agent.tui import _sync_models
+            from src.paper_agent.repl.tui import _sync_models
 
             _sync_models(ui.console, self.config, provider, with_embedding_probe=want_embedding)
             self.config.save()
@@ -245,7 +245,7 @@ class ProviderCommands(ReplBase):
             if name not in self.config.providers:
                 hint = ""
                 for key, kind, label in __import__(
-                    "src.paper_agent.tui", fromlist=["PRESETS"]
+                    "src.paper_agent.repl.tui", fromlist=["PRESETS"]
                 ).PRESETS:
                     if kind == name:
                         hint = f"（可用 [cyan]/connect {key}[/cyan] 添加 {label}）"
@@ -302,7 +302,7 @@ class ProviderCommands(ReplBase):
             if provider is None:
                 ui.console.print("[red]没有可同步的供应商[/red]")
                 return
-            from src.paper_agent.tui import _sync_models
+            from src.paper_agent.repl.tui import _sync_models
 
             _sync_models(ui.console, self.config, provider)
             self.config.save()

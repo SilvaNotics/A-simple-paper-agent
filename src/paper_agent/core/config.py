@@ -12,8 +12,10 @@ from typing import Any
 from pydantic import AliasChoices, Field, SecretStr
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
-# src/paper_agent/config.py -> 仓库根目录
-ROOT_DIR = Path(__file__).resolve().parents[2]
+# src/paper_agent/core/config.py -> 包目录 -> 仓库根目录
+# 用「包目录的上一级」而不是固定 parents[N]：以后在 core/ 下再分层也不会算错。
+PACKAGE_DIR = Path(__file__).resolve().parents[1]
+ROOT_DIR = PACKAGE_DIR.parents[1]
 ENV_FILE = ROOT_DIR / ".env"
 # 项目内本地状态目录（用户配置 + 命令行历史），随项目目录一起移植。
 STATE_DIR = ROOT_DIR / ".paper-agent"
@@ -136,7 +138,8 @@ class Settings(BaseSettings):
     search_timeout: float = 180.0
 
     # ---------------- MCP ----------------
-    mcp_servers_file: Path = Field(default=Path("src/paper_agent/mcp_servers.json"))
+    # 默认用包内绝对路径（随包一起移动也不会失效）；仍可用 MCP_SERVERS_FILE 覆盖。
+    mcp_servers_file: Path = Field(default=PACKAGE_DIR / "sources" / "mcp_servers.json")
     arxiv_mcp_bin: str = ""       # 留空则用当前解释器同目录下的 console script
     paper_search_mcp_bin: str = ""
     semantic_scholar_api_key: SecretStr | None = None
@@ -317,7 +320,7 @@ def get_settings(refresh: bool = False) -> Settings:
     if _settings is None or refresh:
         base = Settings()
         try:
-            from .userconfig import apply_to
+            from ..sources.userconfig import apply_to
 
             _settings = apply_to(base)
         except Exception as exc:  # noqa: BLE001 - 用户配置坏了不能影响启动

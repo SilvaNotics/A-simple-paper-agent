@@ -17,10 +17,10 @@ from typing import Any, Callable, Iterable
 
 from langchain_core.tools import BaseTool
 
-from .agents.search_agent import direct_search
-from .config import Settings, get_settings
-from .llm import get_chat_model, get_embeddings
-from .rag.retriever import (
+from ..agents.search_agent import direct_search
+from ..core.config import Settings, get_settings
+from ..llm.factory import get_chat_model, get_embeddings
+from ..rag.retriever import (
     CitationCollector,
     anchors_in,
     format_context,
@@ -28,10 +28,10 @@ from .rag.retriever import (
     retrieve_across_papers,
     verify_answer,
 )
-from .rag.store import IndexSignatureError, PaperIndex
+from ..rag.store import IndexSignatureError, PaperIndex
 from .report import build_bibtex, write_outputs
-from .schema import Answer, Paper
-from .utils import dedupe_papers, normalize_paper_id, truncate
+from ..core.schema import Answer, Paper
+from ..core.utils import dedupe_papers, normalize_paper_id, truncate
 
 logger = logging.getLogger(__name__)
 
@@ -78,7 +78,7 @@ def build_session(settings: Settings | None = None) -> Session:
     自动改用 `data/by-embedding/<签名>/` 作为该 embedding 的独立索引目录，
     避免不同维度互相污染，也避免用户还要手动清理索引。
     """
-    from .llm import ConfigError
+    from ..llm.factory import ConfigError
 
     s = settings or get_settings()
     s.ensure_dirs()
@@ -90,8 +90,8 @@ def build_session(settings: Settings | None = None) -> Session:
     try:
         index = PaperIndex.load_or_create(embeddings, s)
     except IndexSignatureError as exc:
-        from .rag.store import embedding_signature
-        from .utils import slugify
+        from ..rag.store import embedding_signature
+        from ..core.utils import slugify
 
         sig = slugify(embedding_signature(embeddings, s).replace(":", "-").replace("/", "-"), 40)
         s = s.model_copy(update={"data_dir": Path(s.data_dir) / "by-embedding" / sig})
@@ -118,7 +118,7 @@ async def ensure_tools(session: Session) -> list[BaseTool]:
         return session.search_tools
     key = f"{session.settings.servers_file}|{session.settings.fake_llm}"
     if key not in _TOOL_CACHE:
-        from .mcp_client import load_mcp_tools
+        from ..sources.mcp import load_mcp_tools
 
         try:
             _TOOL_CACHE[key] = await load_mcp_tools(session.settings)
@@ -189,7 +189,7 @@ async def _run_search_impl(
     model = _search_model(s, session, use_llm)
     queries = [query]
     if model is not None:
-        from .search_llm import expand_queries
+        from ..llm.search import expand_queries
 
         queries = await expand_queries(model, query, n=3, settings=s)
         logger.info("LLM 查询扩展：%s → %s", truncate(query, 40), queries)
@@ -234,13 +234,13 @@ async def _run_search_impl(
             cap = len(merged)  # 已完成按渠道截断，不再做全局截断
 
     if model is not None and len(merged) > cap:
-        from .search_llm import rank_papers
+        from ..llm.search import rank_papers
 
         merged = await rank_papers(model, query, merged, cap, settings=s)
 
     # 国内渠道优先：稳定排序把国内库结果提到前面，截断到 cap 时优先保留
     if getattr(s, "prefer_domestic", True):
-        from .sources import papers_domestic_first
+        from ..sources.fetchers import papers_domestic_first
 
         merged = papers_domestic_first(merged)
 
@@ -287,7 +287,7 @@ async def _search_once(
         return papers[:limit] if truncate else papers
 
     def _builtin():
-        from .sources import builtin_search
+        from ..sources.fetchers import builtin_search
 
         # 只透传“有值”的参数：显式 `--sources`、以及启用了逐渠道进度时的 on_event。
         # （不传 None，兼容只接受 (query, limit, settings) 的旧调用/测试替身。）
@@ -342,7 +342,7 @@ async def _search_once(
 async def _load_tools_once(settings: Settings) -> list[BaseTool]:
     key = f"{settings.servers_file}|{settings.fake_llm}"
     if key not in _TOOL_CACHE:
-        from .mcp_client import load_mcp_tools
+        from ..sources.mcp import load_mcp_tools
 
         try:
             _TOOL_CACHE[key] = await load_mcp_tools(settings)
@@ -361,7 +361,7 @@ async def run_ingest(
     session: Session | None = None,
 ) -> list[dict[str, Any]]:
     """检索 → 下载 → 解析 → 切分 → 入库（不调用 LLM）。"""
-    from .tools.paper_tools import ingest_paper
+    from ..tools.paper_tools import ingest_paper
 
     s = _session_settings(session, settings)
     index = _session_index(session, s)
@@ -372,7 +372,7 @@ async def run_ingest(
     papers: list[Paper] = []
     route = ""
     if wanted:
-        from .sources import resolve_ids
+        from ..sources.fetchers import resolve_ids
 
         resolved, failures = await resolve_ids(wanted, s, limit=limit)
         papers.extend(resolved)
@@ -410,7 +410,7 @@ async def ingest_papers(
     供 `run_ingest` 与「`/search ... --ingest`」复用：前者不再需要二次检索，
     后者能把刚搜到的候选（含非 arXiv/DOI 来源）直接落库。
     """
-    from .tools.paper_tools import ingest_paper
+    from ..tools.paper_tools import ingest_paper
 
     s = _session_settings(session, settings)
     index = _session_index(session, s)
@@ -496,7 +496,7 @@ async def ask(
     context = format_context(docs, collector) if docs else "（没有检索到相关片段）"
 
     if s.fake_llm:
-        from .agents.rag_agent import answer_without_llm
+        from ..agents.rag_agent import answer_without_llm
 
         answer = await answer_without_llm(question, context)
     elif stream_callback is not None:
@@ -725,7 +725,7 @@ async def _stream_answer(
     on_token: Callable[[str], None],
 ) -> Answer:
     """流式生成回答（不强制结构化输出，改为生成后按锚点解析）。"""
-    from .agents import prompts
+    from ..agents import prompts
 
     model = (session.model if session else None) or get_chat_model("synthesize", settings)
     system = (
@@ -813,11 +813,11 @@ async def run_report(
 
     collector = None
     if simple:
-        from .agents.supervisor import build_simple_app
+        from ..agents.supervisor import build_simple_app
 
         graph, index, collector = await build_simple_app(s, search_tools=search_tools or None)
     else:
-        from .agents.supervisor import build_app
+        from ..agents.supervisor import build_app
 
         graph, deps = await build_app(s, search_tools=search_tools)
         index = deps.index

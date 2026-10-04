@@ -9,9 +9,9 @@ import logging
 from langchain.agents import create_agent
 from langchain_core.language_models import BaseChatModel
 
-from ..schema import Paper, PaperSummary
+from ..core.schema import Paper, PaperSummary
 from ..rag.retriever import anchors_in
-from ..utils import extract_json, truncate
+from ..core.utils import extract_json, truncate
 from . import prompts
 from .common import result_text, structured_response
 

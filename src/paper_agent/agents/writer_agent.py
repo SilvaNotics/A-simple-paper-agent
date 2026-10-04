@@ -10,7 +10,7 @@ from langchain.agents import create_agent
 from langchain_core.language_models import BaseChatModel
 from pydantic import BaseModel, Field
 
-from ..utils import extract_json, truncate
+from ..core.utils import extract_json, truncate
 from . import prompts
 from .common import result_text, structured_response
 

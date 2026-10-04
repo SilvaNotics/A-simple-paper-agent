@@ -2,7 +2,7 @@
 """`/connect` 相关交互与统一的选择器入口。
 
 **选择器已完全重写**：不再手写原始终端渲染（在复杂终端下会错位/重复打印），
-统一委托给 `repl_input.pick_value()` —— 它用 prompt_toolkit 的补全菜单实现：
+统一委托给 `repl/input.py` 的 `pick_value()` —— 它用 prompt_toolkit 的补全菜单实现：
 输入即过滤、↑↓/PgUp/PgDn 滚动、CJK 宽度由库正确处理、鼠标滚轮可用，
 与命令面板（输入 `/` 弹命令列表）共用同一套引擎。
 
@@ -22,8 +22,8 @@ from rich.console import Console
 from rich.panel import Panel
 from rich.table import Table
 
-from .utils import clean_pasted, clean_secret, mask_secret
-from .userconfig import (
+from ..core.utils import clean_pasted, clean_secret, mask_secret
+from ..sources.userconfig import (
     PROVIDER_HINTS,
     Provider,
     UserConfig,
@@ -101,7 +101,7 @@ def pick_from_list(
     非交互：一次性列出全部选项 + 编号输入（`d<编号>` 设默认、`/关键词` 过滤）。
     初始高亮位置由 `current` 决定。
     """
-    from .repl_input import pick_value
+    from .input import pick_value
 
     return pick_value(
         console,

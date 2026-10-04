@@ -5,7 +5,7 @@ from __future__ import annotations
 
 from pydantic import BaseModel
 
-from ..utils import mcp_result_to_text
+from ..core.utils import mcp_result_to_text
 
 
 def structured_response(result: object) -> BaseModel | None:
