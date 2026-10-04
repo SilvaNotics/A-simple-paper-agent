@@ -3,7 +3,9 @@
 
 所有供应商统一走 OpenAI 兼容格式（`{base_url}/chat/completions`、`/models`、`/embeddings`）。
 
-- 配置文件默认 `~/.config/paper-agent/config.json`（`PAPER_AGENT_CONFIG` 可覆盖），0600，不进仓库；
+- 配置文件默认落在**项目内** `<仓库根>/.paper-agent/config.json`（`PAPER_AGENT_CONFIG` 可覆盖），
+  0600，随项目目录一起拷贝即可跨系统移植；该目录已被 `.gitignore` 忽略，密钥不会入库；
+- 旧版 `~/.config/paper-agent/config.json` 自动迁移到项目内（见 `_migrate_legacy_config`）；
 - 按 base URL 自动识别供应商类型，据此决定少量差异化行为与推荐模型；
 - 自动拉取 `/models` 并分类（chat / embedding），供 `/models` 切换；
 - `apply_to(settings)` 把当前供应商 + 默认模型注入 `Settings`，`llm.py` 优先使用。
@@ -15,6 +17,7 @@ import json
 import logging
 import os
 import re
+import shutil
 from dataclasses import asdict, dataclass, field
 from pathlib import Path
 from typing import Any, Iterable
@@ -23,14 +26,31 @@ import httpx
 from pydantic import SecretStr
 
 from .channels import channel_label, default_base_url, spec_for
-from .config import Settings
+from .config import ROOT_DIR, Settings
 from .utils import clean_pasted, clean_secret, mask_secret
 
 logger = logging.getLogger(__name__)
 
 CONFIG_ENV = "PAPER_AGENT_CONFIG"
 IGNORE_ENV = "PAPER_AGENT_IGNORE_USER_CONFIG"
-DEFAULT_CONFIG_PATH = Path("~/.config/paper-agent/config.json")
+# 默认写进项目内：整个项目目录拷贝到别的机器/系统后配置与密钥一并带走。
+DEFAULT_CONFIG_PATH = ROOT_DIR / ".paper-agent" / "config.json"
+# 旧版位置（仅用于一次性迁移，不再作为默认读写路径）。
+LEGACY_CONFIG_PATH = Path("~/.config/paper-agent/config.json")
+
+
+def _migrate_legacy_config() -> None:
+    """把旧版 `~/.config/paper-agent/config.json` 迁到项目内（幂等，只做一次）。"""
+    legacy = LEGACY_CONFIG_PATH.expanduser()
+    if DEFAULT_CONFIG_PATH.exists() or not legacy.exists():
+        return
+    try:
+        DEFAULT_CONFIG_PATH.parent.mkdir(parents=True, exist_ok=True)
+        shutil.copy2(legacy, DEFAULT_CONFIG_PATH)
+        DEFAULT_CONFIG_PATH.chmod(0o600)
+        logger.info("已迁移旧用户配置：%s → %s", legacy, DEFAULT_CONFIG_PATH)
+    except OSError as exc:  # pragma: no cover - 权限异常时退回默认位置
+        logger.warning("旧用户配置迁移失败（%s）：%s", legacy, exc)
 
 # --------------------------------------------------------------------------
 # 供应商识别
@@ -351,11 +371,13 @@ class SearchChannel:
 
 
 class UserConfig:
-    """`~/.config/paper-agent/config.json` 的读写。"""
+    """`<仓库根>/.paper-agent/config.json`（项目内，随项目移植）的读写。"""
 
     def __init__(self, path: Path | None = None) -> None:
-        explicit = path or os.getenv(CONFIG_ENV) or DEFAULT_CONFIG_PATH
-        self.path = Path(explicit).expanduser()
+        explicit = path or os.getenv(CONFIG_ENV)
+        if not explicit:
+            _migrate_legacy_config()
+        self.path = Path(explicit).expanduser() if explicit else DEFAULT_CONFIG_PATH
         self.default_provider: str = ""
         self.default_model: str = ""
         # 显式指定负责 embedding 的供应商（空 = 自动挑选：对话供应商 → 默认 → 第一个带 embedding 的）

@@ -143,6 +143,7 @@ class Settings(BaseSettings):
     mcp_default_sources: str = ""
 
     # ---------------- 路径 ----------------
+    # 运行产物相对仓库根解析：论文库 data/papers/，报告（Markdown/BibTeX/JSON）output/。
     data_dir: Path = Path("data")
     output_dir: Path = Path("output")
 
@@ -187,6 +188,7 @@ class Settings(BaseSettings):
 
     @property
     def papers_dir(self) -> Path:
+        """论文库：`<仓库根>/data/papers/`（下载的 PDF 缓存）。"""
         return _abs(self.data_dir) / "papers"
 
     @property
@@ -203,6 +205,7 @@ class Settings(BaseSettings):
 
     @property
     def output_path(self) -> Path:
+        """报告输出目录：`<仓库根>/output/`（Markdown + BibTeX + JSON）。"""
         return _abs(self.output_dir)
 
     @property
@@ -293,7 +296,7 @@ _settings: Settings | None = None
 
 
 def get_settings(refresh: bool = False) -> Settings:
-    """进程级单例：先读 .env / 环境变量，再叠加 `~/.config/paper-agent/config.json`。
+    """进程级单例：先读 .env / 环境变量，再叠加 `<仓库根>/.paper-agent/config.json`。
 
     叠加规则：`/connect` 写入的 JSON 配置优先级更高（可用
     `PAPER_AGENT_IGNORE_USER_CONFIG=1` 关闭叠加，退回纯 .env 行为）。

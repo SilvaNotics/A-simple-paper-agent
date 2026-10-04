@@ -10,7 +10,7 @@
 # 迁移到新机器：
 #   1) pip install -r requirements.txt
 #   2) 准备密钥：复制 .env（DASHSCOPE_API_KEY 等），或启动 main.py 后用 /connect 交互配置
-#      （供应商配置默认落在 ~/.config/paper-agent/config.json）
+#      （供应商配置默认落在项目内 .paper-agent/config.json，随目录一起移植）
 #   3) 可选：复制 data/ 目录（已下载的 PDF 与向量索引），避免重新抓取+向量化
 #   4) 自检：python -m src.paper_agent selftest && python -m src.paper_agent mcp-tools
 #

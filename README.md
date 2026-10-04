@@ -32,12 +32,21 @@ python -m src.paper_agent mcp-tools    # MCP server 与工具白名单（可选�
 
 两种方式，**JSON 配置优先于 `.env`**：
 
-1. **交互（推荐）**：REPL 里 `/connect` —— 输入 base URL + API key，自动识别供应商、拉取 `/models`、分类对话/embedding 模型并写入 `~/.config/paper-agent/config.json`（0600）。
+1. **交互（推荐）**：REPL 里 `/connect` —— 输入 base URL + API key，自动识别供应商、拉取 `/models`、分类对话/embedding 模型并写入项目内 `.paper-agent/config.json`（0600）。配置跟着项目目录走，换系统直接拷贝即可；旧版 `~/.config/paper-agent/config.json` 会自动迁移过来。
 2. **`.env`**：直接填 `DASHSCOPE_*` / `DEEPSEEK_*`，或用通用变量 `LLM_BASE_URL` / `LLM_API_KEY` / `LLM_MODEL`。
    embedding 可单独指定：`EMBED_BASE_URL` / `EMBED_API_KEY` / `EMBED_MODEL`（对话用 A 家、embedding 用 B 家）。
 
 > JSON 配置 > `.env`；想只用 `.env` 设 `PAPER_AGENT_IGNORE_USER_CONFIG=1`。
 > 换 embedding 模型/维度时索引自动切到 `data/by-embedding/<签名>/`，不会维度混用。
+
+### 目录约定
+
+| 路径 | 内容 |
+|---|---|
+| `.paper-agent/config.json` | `/connect` 的供应商/渠道配置（0600，已被 gitignore，随项目移植） |
+| `data/papers/` | **论文库**：下载的 OA 全文 PDF 缓存 |
+| `data/index/`、`data/by-embedding/<签名>/` | 向量索引（按 embedding 签名隔离） |
+| `output/` | **报告默认保存位置**：`<时间戳>-<slug>.md` + `.bib` + `.json`；`/save` 的会话也存这里 |
 
 ## 使用
 

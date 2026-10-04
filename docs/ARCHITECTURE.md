@@ -67,7 +67,7 @@ plan → search_one×N → merge → ingest_one×M → summarize_one×M
 ### `userconfig.py` — 供应商 JSON 配置
 
 - 数据结构：`Provider`（base_url / key / kind / chat_model / embedding_model / embedding_dim / 模型列表）与 `SearchChannel`。
-- 读写 `~/.config/paper-agent/config.json`（原子写 + 0600，可用 `PAPER_AGENT_CONFIG` 改路径）。
+- 读写 `<仓库根>/.paper-agent/config.json`（项目内，原子写 + 0600，随项目移植；可用 `PAPER_AGENT_CONFIG` 改路径）。
 - `detect_provider()`：按 base URL 子串识别 dashscope / deepseek / openai / moonshot / siliconflow / zhipu / volcengine / openrouter / local / 通用兼容端点。
 - `classify_models()`：把 `/models` 结果按名称特征分成对话 / embedding；`guess_chat_model()` / `guess_embedding_model()` 推断默认值。
 - 网络：`fetch_models()` 拉 `/models`；`probe_embedding_dim()` 发一次极小 embedding 请求探测维度（用于索引签名）。

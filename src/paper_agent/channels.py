@@ -3,7 +3,7 @@
 
 设计目标：**像 `/connect` 配置模型供应商一样配置搜索渠道**——
 每个渠道就是一条记录（kind + base_url + api_key/email + enabled），
-用户可自主添加/删除，密钥只写进 `~/.config/paper-agent/config.json`。
+用户可自主添加/删除，密钥只写进项目内 `.paper-agent/config.json`（随项目移植）。
 
 本模块只放「元数据与默认值」，真正的联网检索实现在 `sources.py`
 （那里统一走带重试的 `_request`）。新增渠道的步骤：

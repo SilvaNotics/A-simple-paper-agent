@@ -55,8 +55,13 @@ pythonenv*
 .condarc
 
 # 运行产物：数据（PDF 缓存 + 向量索引）、报告、日志
-data/
-output/
+# 只保留目录骨架（.gitkeep）便于克隆后即可用；论文库固定 data/papers/，报告固定 output/。
+data/*
+!data/papers/
+data/papers/*
+!data/papers/.gitkeep
+output/*
+!output/.gitkeep
 logs/
 *.log
 *.tmp
