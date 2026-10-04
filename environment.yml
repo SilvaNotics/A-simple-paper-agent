@@ -5,13 +5,14 @@
 #   conda activate agent                    # 激活
 #   python -m src.paper_agent selftest      # 自检（chat / embedding）
 #
-# 完整依赖（含全部传递依赖、精确版本，端口化移植用）见 requirements.txt。
+# 完整依赖（含全部传递依赖、精确版本，端口化移植用）见 pyproject.toml。
 # 若需完全复刻本机 conda 环境（含 conda 构建号），用 `conda env export` 重新导出。
 # ============================================================================
 name: agent
 channels:
+  - conda-forge
   - defaults
-  # - conda-forge        # 若 defaults 找不到某个包，可启用
+
 
 dependencies:
   - python>=3.11          # 本方案验证于 3.14.7（arxiv-mcp-server 要求 >=3.11）

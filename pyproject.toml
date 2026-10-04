@@ -1,0 +1,233 @@
+# -*- mode: toml -*-
+# ============================================================================
+# 学术论文检索与概括分析 Agent —— 项目元数据 / 依赖 / 工具配置（唯一配置源）
+# ============================================================================
+# 环境要求 : Python >= 3.11（依赖集在 Python 3.14.7 上全新安装并跑通全部测试）
+# 安装     :
+#   pip install -e .           # 运行依赖（精确 pin，含全部传递依赖，可直接移植）
+#   pip install -e ".[dev]"    # 追加 pytest / mypy（跑测试与类型检查）
+#   conda env create -f environment.yml && conda activate agent   # 或用 conda（只列直接依赖）
+#
+# 迁移到新机器：
+#   1) pip install -e .
+#   2) 准备密钥：复制 .env（DASHSCOPE_API_KEY 等），或启动 main.py 后用 /connect 交互配置
+#      （供应商配置默认落在项目内 .paper-agent/config.json，随目录一起移植）
+#   3) 可选：复制 data/ 目录（已下载的 PDF 与向量索引），避免重新抓取+向量化
+#   4) 自检：python -m src.paper_agent selftest && python -m src.paper_agent mcp-tools
+#
+# 注意   : langchain-mcp-adapters 0.3.2 要求 mcp<2，请勿单独升级 mcp 到 2.x。
+# ============================================================================
+
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "paper-agent"
+version = "0.1.0"
+description = "学术论文检索与概括分析 Agent：联网检索论文 → 下载 OA 全文 → RAG 带引用问答 → 多 agent 出调研报告"
+readme = "README.md"
+requires-python = ">=3.11"
+keywords = ["langchain", "langgraph", "rag", "mcp", "arxiv", "paper-search", "agent"]
+# 运行必需的完整依赖闭包（此前为 requirements.txt，精确版本，可直接移植）
+dependencies = [
+    # 说明：numpy 是隐式必需项 —— langchain-core 的 InMemoryVectorStore 在算余弦相似度时
+    #       需要 numpy，但 langchain-core 并未把它声明为硬依赖，故这里显式固定。
+    "aiofile==3.12.3",
+    "aiofiles==25.1.0",
+    "aiohappyeyeballs==2.7.1",
+    "aiohttp==3.14.3",
+    "aiosignal==1.4.0",
+    "annotated-doc==0.0.5",
+    "annotated-types==0.8.0",
+    "anyio==4.15.1",
+    "arxiv==4.0.1",
+    "arxiv-mcp-server==0.8.0",
+    "attrs==26.1.0",
+    "Authlib==1.8.0",
+    "beartype==0.22.9",
+    "beautifulsoup4==4.15.0",
+    "cachetools==7.2.0",
+    "caio==0.12.9",
+    "certifi==2026.7.22",
+    "cffi==2.1.1",
+    "charset-normalizer==3.5.2",
+    "click==8.5.0",
+    "crossref-mcp==0.1.0",
+    "cryptography==50.0.2",
+    "cyclopts==5.1.1",
+    "distro==1.9.0",
+    "dnspython==2.8.0",
+    "docstring_parser==0.18.0",
+    "email-validator==2.3.0",
+    "exceptiongroup==1.3.1",
+    "fastmcp==3.4.7",
+    "fastmcp-slim==3.4.7",
+    "feedparser==6.0.14",
+    "feedparser-sgmllib==2.1.0",
+    "frozenlist==1.8.0",
+    "griffelib==2.3.0",
+    "h11==0.16.0",
+    "html5lib==1.1",
+    "httpcore==1.0.9",
+    "httpcore2==2.13.1",
+    "httpx==0.28.1",
+    "httpx-sse==0.4.3",
+    "httpx2==2.13.1",
+    "idna==3.20",
+    "jaraco.classes==3.4.0",
+    "jaraco.context==6.1.2",
+    "jaraco.functools==4.6.0",
+    "jeepney==0.9.0",
+    "jiter==0.17.0",
+    "joserfc==1.7.5",
+    "jsonpatch==1.33",
+    "jsonpointer==3.1.1",
+    "jsonref==1.1.0",
+    "jsonschema==4.26.0",
+    "jsonschema-path==0.5.0",
+    "jsonschema-specifications==2025.9.1",
+    "keyring==25.7.0",
+    "langchain==1.4.3",
+    "langchain-core==1.6.6",
+    "langchain-mcp-adapters==0.3.2",
+    "langchain-openai==1.6.7",
+    "langchain-protocol==0.0.19",
+    "langchain-text-splitters==1.1.3",
+    "langgraph==1.2.12",
+    "langgraph-checkpoint==4.2.0",
+    "langgraph-prebuilt==1.1.0",
+    "langgraph-sdk==0.4.5",
+    "langsmith==0.14.4",
+    "lxml==6.1.3",
+    "markdown-it-py==4.2.0",
+    "markdownify==1.2.3",
+    "mcp==1.30.0",
+    "mcp-server-fetch==2026.8.18",
+    "mdurl==0.1.2",
+    "more-itertools==11.1.0",
+    "multidict==6.9.1",
+    "numpy==2.5.3",
+    "openai==3.24.0",
+    "openapi-pydantic==0.6.0",
+    "opentelemetry-api==1.45.0",
+    "orjson==3.12.0",
+    "ormsgpack==1.12.2",
+    "packaging==26.3",
+    "paper-search-mcp==0.1.4",
+    "pathable==0.6.0",
+    "pdfminer.six==20260107",
+    "pdfplumber==0.11.10",
+    "pillow==12.3.0",
+    "platformdirs==4.12.2",
+    "propcache==0.5.4",
+    "Protego==0.7.0",
+    "pubmedclient==0.2.0",
+    "pubmedmcp==0.1.4",
+    "py-key-value-aio==0.4.6",
+    "pycparser==3.0",
+    "pydantic==2.13.5",
+    "pydantic-settings==2.15.0",
+    "pydantic_core==2.46.5",
+    "Pygments==2.21.0",
+    "PyJWT==2.15.1",
+    "pymupdf==1.28.2",
+    "pypdf==6.19.0",
+    "pypdfium2==5.13.0",
+    "pyperclip==1.11.0",
+    "python-dateutil==2.9.0.post0",
+    "python-dotenv==1.2.4",
+    "python-multipart==0.0.32",
+    "PyYAML==6.0.3",
+    "readabilipy==0.3.0",
+    "referencing==0.37.0",
+    "regex==2026.9.29",
+    "requests==2.34.2",
+    "requests-toolbelt==1.0.0",
+    "rich==15.0.0",
+    "rich-rst==2.2.0",
+    "rpds-py==2026.6.3",
+    "SecretStorage==3.5.0",
+    "shellingham==1.5.4",
+    "six==1.17.0",
+    "sniffio==1.3.1",
+    "socksio==1.0.0",
+    "soupsieve==2.10",
+    "sse-starlette==3.5.0",
+    "starlette==1.7.0",
+    "tenacity==9.1.4",
+    "tiktoken==0.14.0",
+    "truststore==0.10.4",
+    "typer==0.27.2",
+    "typing-inspection==0.4.4",
+    "typing_extensions==4.16.0",
+    "uncalled-for==0.4.0",
+    "urllib3==2.8.0",
+    "uuid_utils==0.17.1",
+    "uvicorn==0.54.0",
+    "watchfiles==1.3.0",
+    "webencodings==0.6.1",
+    "websockets==16.1.1",
+    "xxhash==4.0.1",
+    "yarl==1.25.1",
+    "zstandard==0.25.0",
+]
+
+[project.optional-dependencies]
+# 开发 / 测试（跑 pytest、mypy 必需）：pip install -e ".[dev]"
+dev = [
+    "ast_serialize==0.12.0",
+    "iniconfig==2.3.0",
+    "librt==0.16.0",
+    "mypy==2.4.0",
+    "mypy_extensions==1.1.0",
+    "pathspec==1.1.1",
+    "pluggy==1.6.0",
+    "pytest==9.1.1",
+    "pytest-asyncio==1.4.0",
+]
+
+# ---------------------------------------------------------------------------
+# 可选增强（默认不装；需要时把对应行取消注释并重跑 pip install）
+# ---------------------------------------------------------------------------
+# rank-bm25>=0.2.2               # 混合检索（BM25 + 向量）：配合 HYBRID_RETRIEVAL=true
+# langchain-community>=0.4.2     # 混合检索用到的 BM25Retriever（已进入 sunset，仍可用）
+# faiss-cpu>=1.15.1              # 语料很大时替换 InMemoryVectorStore
+# chromadb>=1.5.9                # 跨进程/多用户共享向量库
+# qdrant-client>=1.19.1          # 同上（服务端向量库）
+# langchain-huggingface>=1.2.2   # 完全离线 embedding（需再装 torch，体积大）
+# sentence-transformers>=6.1.0   # 本地 embedding 模型
+# langsmith>=0.10.9              # 链路追踪（设置 LANGSMITH_API_KEY 即可开启）
+# dashscope>=1.27.7              # 阿里云 DashScope 官方 SDK（本项目走 OpenAI 兼容接口，非必需）
+# streamlit>=1.40                # 如需 Web UI
+
+# 包布局：源码以 `src.paper_agent` 为导入路径（`python -m src.paper_agent ...`），
+# 因此在项目根目录直接运行即可；`pip install -e .` 只是把同一路径挂进环境。
+[tool.setuptools.packages.find]
+where = ["."]
+include = ["src.paper_agent*"]
+
+# ---------------------------------------------------------------------------
+# pytest（原 pytest.ini）
+# ---------------------------------------------------------------------------
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["."]
+asyncio_mode = "auto"
+addopts = "-q"
+filterwarnings = ["ignore::DeprecationWarning"]
+
+# ---------------------------------------------------------------------------
+# mypy（原 mypy.ini）
+# 类型检查：`python -m mypy --ignore-missing-imports src main.py`
+# （第三方库大多没有完整类型信息，缺失导入一律忽略；我们的代码本身要求零 error）
+# ---------------------------------------------------------------------------
+[tool.mypy]
+python_version = "3.14"
+explicit_package_bases = true
+mypy_path = "."
+ignore_missing_imports = true
+warn_unused_ignores = false
+warn_redundant_casts = true
+show_error_codes = true
+exclude = '(^data/|^output/|^tests/fixtures/)'
