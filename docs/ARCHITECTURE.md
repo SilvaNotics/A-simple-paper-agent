@@ -106,6 +106,15 @@ plan → search_one×N → merge → ingest_one×M → summarize_one×M
   - `by_channel` 按 kind 分别收集结果；缺 key 的渠道跳过并标 `(需key)⊘`；
   - `papers_domestic_first()` 让国内库靠前；`_short_error()` 把异常压成 `429`/`Timeout`/`需key` 等短标签。
 
+### `sources/oa.py` — 全文获取兜底（没有 PDF 直链时）
+
+入库时的降级链由这里提供前两段，`ingest_paper()` 按顺序调用：
+
+1. `discover_pdf_url()` —— **补链**：arXiv 链接直接推 `/pdf/<id>`；DOI 走 Unpaywall（`UNPAYWALL_EMAIL`，缺邮箱则退回 `OPENALEX_MAILTO`）与 OpenAlex `best_oa_location`；再抓落地页 HTML，用 `citation_pdf_url` meta / `link[type=application/pdf]` / `.pdf` 链接定位全文。
+2. `fetch_page_text()` —— **网页正文**：`fetch_html()` 抓页面（复用 `fetchers._request` 的重试；按 HTTP 头/`<meta charset>` 猜编码，中文站 GBK 也能解），`core.htmltext.html_to_text()` 抽正文；短于 `WEB_TEXT_MIN_CHARS` 视为无效。
+
+`pdf_url_from_unpaywall()` / `pdf_url_from_html()` / `html_to_text()` 都是纯函数（不联网），可离线单测；三者失败都不阻断入库，只记录日志。
+
 ### `llm/search.py` — 检索中的 LLM 增强
 
 - `expand_queries()`：把主题扩成多条英文检索式（提升召回）；`rank_papers()`：对合并后的候选做相关性重排/裁剪。
@@ -130,10 +139,10 @@ plan → search_one×N → merge → ingest_one×M → summarize_one×M
 |---|---|
 | `fetch.py` | 只抓开放获取 PDF：命中本地缓存直接返回；`httpx` 下载后校验 `%PDF` 魔数再落 `data/papers/<safe_filename(paper_id)>.pdf`（文件名规则在 `core.utils.safe_filename`）。返回 `(path, message)`，失败原因会写进入库结果。 |
 | `parse.py` | 优先 `pymupdf`（更快更准），失败/未装回退 `pdfplumber`。清洗：合并跨行连字符、压缩空白、去多页重复的页眉页脚；`_cut_references()` 在文末 References 处截断（保守策略，只在确实像文献表时才切）。`ParsedDoc` 保留逐页文本、engine 与 `title`（`guess_title()`：优先 PDF 内嵌元数据，其次首页第一行像标题的文本；仅在元数据缺失时作兜底）。 |
-| `split.py` | `RecursiveCharacterTextSplitter`（中英混排分隔符）+ 每 chunk 元数据 `paper_id/title/page/chunk_index/source`。 |
+| `split.py` | `RecursiveCharacterTextSplitter`（中英混排分隔符）+ 每 chunk 元数据 `paper_id/title/page/chunk_index/source`。非 PDF 内容走 `split_text_document()`：不带页码，改用 `kind=web/abstract/metadata` 标记内容级别；`build_record_text()` 生成带 `[仅题录…]`/`[仅摘要…]` 前缀的书目文本，提醒模型这不是全文证据。 |
 | `embeddings.py` | `RetryingEmbeddings`：遇到 `batch size` 类 400 自动**二分拆批**，瞬态错误（429/5xx/超时）指数退避重试。 |
 | `store.py` | `PaperIndex` = `InMemoryVectorStore` + 本地 JSON 持久化。`dump/load` 直接复用 langchain 内置能力；另维护 `manifest.json`（论文 → chunk id 列表、PDF 路径、sha256、元数据），支持增量更新与删除。`embedding_signature()` 记录模型+维度，加载时不匹配抛 `IndexSignatureError`。检索用 `similarity_search_with_score(filter=...)` 按 `paper_id` 过滤。 |
-| `retriever.py` | `CitationCollector` 给片段编锚点（`{prefix}C1..Cn`，并行分支带不同前缀避免撞号）；`format_context()` 渲染带锚点上下文；`retrieve()` / `retrieve_across_papers()`（每篇保底片段数，避免证据偏置）/ `_hybrid_rerank()`（可选 BM25 线性加权）。**引用校验**：`tokenize/support_ratio/has_anchor` 做字面重合，`hard_tokens/cross_lingual_support` 用术语/数字做跨语言判定；`verify_answer()` 综合判定，`verify_report_citations()` 校验最终报告锚点。 |
+| `retriever.py` | `CitationCollector` 给片段编锚点（`{prefix}C1..Cn`，并行分支带不同前缀避免撞号）；`format_context()` 渲染带锚点上下文（`kind=web/abstract/metadata` 的片段会标「网页正文 / 仅摘要，无全文 / 仅题录，无全文」）；`retrieve()` / `retrieve_across_papers()`（每篇保底片段数，避免证据偏置）/ `_hybrid_rerank()`（可选 BM25 线性加权）。**引用校验**：`tokenize/support_ratio/has_anchor` 做字面重合，`hard_tokens/cross_lingual_support` 用术语/数字做跨语言判定；`verify_answer()` 综合判定，`verify_report_citations()` 校验最终报告锚点。 |
 
 ---
 
@@ -141,7 +150,7 @@ plan → search_one×N → merge → ingest_one×M → summarize_one×M
 
 ### `tools/`
 
-- `paper_tools.py`：`ingest_paper()` 确定性入库（下载→解析→切分→向量化→落盘），失败分类返回 `no_pdf / parse_error / empty / embed_error`；`make_paper_tools()` 暴露给 agent 的 `download_and_index_paper` / `list_indexed_papers`。
+- `paper_tools.py`：`ingest_paper()` 确定性入库（**补链 → 下载 → 解析 → 切分 → 向量化 → 落盘**）。没有 PDF 直链时按四级降级：`indexed`（PDF 全文）→ `web`（抓网页正文，Wikipedia/百科/新闻页）→ `abstract`（仅摘要）→ `metadata`（仅题录），后三者都在 chunk 内容里标注「非全文」并写 `kind`，不会伪装成 PDF 证据；确实取不到内容才是 `no_pdf`，另有 `parse_error / empty / embed_error`。`INDEXED_STATUSES`（`core.schema`）集中定义「已入库」状态，CLI/REPL/图校验共用。`make_paper_tools()` 暴露给 agent 的 `download_and_index_paper` / `list_indexed_papers`。
 - `rag_tools.py`：`make_rag_tools()` 给 agent 的 `search_corpus` / `read_chunk`（检索结果写进 `CitationCollector`）。
 
 ### `agents/`
@@ -243,6 +252,7 @@ src/paper_agent/
   cli.py                       typer 子命令（薄封装 pipeline；+ papers-open/papers-close 独立起/停预览）
   core/                        基础设施层（无业务逻辑，被各层复用）
     config.py                  pydantic-settings 全局配置 + 源/路径派生属性
+    htmltext.py                HTML 纯函数：PDF 直链提取 + 网页正文抽取（bs4，不联网）
     logging.py                 日志落盘：按天分文件 logs/paper-agent-YYYY-MM-DD.log（保留 N 天）+ 控制台 handler
     schema.py                  数据模型与图状态
     utils.py                   ID 归一化、去重、粘贴清洗、文件名安全化、JSON 抽取、假 embedding
@@ -250,6 +260,7 @@ src/paper_agent/
   sources/                     来源层（渠道 / 抓取 / MCP / 供应商凭证）
     channels.py                渠道注册表（元数据、分组、国内优先、预设编号）
     fetchers.py                内置 HTTP 检索：arXiv/OpenAlex/Crossref + 可配置渠道 + 按 ID 直抓（429 降级直链）
+    oa.py                      全文兜底：补链（Unpaywall/OpenAlex/落地页 meta）+ 网页正文抓取
     mcp.py                     MCP 接入：server 加载、工具白名单/源收敛/参数护栏/文本化
     userconfig.py              供应商 JSON 配置：识别/读写/模型分类/注入 Settings
     mcp_servers.json           MCP server 模板（stdio / streamable_http）

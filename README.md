@@ -69,7 +69,7 @@ python main.py --offline               # 假模型 + 独立索引目录（无密
 | 命令 | 作用 |
 |---|---|
 | `/search <词> [--limit N] [--ingest [N]] [--source auto\|mcp\|builtin\|all] [--no-llm]` | 联网检索；`--limit N` = **每个渠道**最多 N 条（不随 LLM 扩展的检索式数量放大） |
-| `/ingest <词> [--limit N] [--ids arxiv:xxx] [--force]` | 下载入库，建立/更新索引 |
+| `/ingest <词> [--limit N] [--ids arxiv:xxx] [--force]` | 下载入库，建立/更新索引；没有 PDF 直链时逐级降级：补链 → 网页正文 → 仅摘要/仅题录（标注为非全文） |
 | `/ask <问题> [--papers a,b] [--k N]` | 带引用问答（默认流式） |
 | `/report <主题> [--papers N] [--simple]` | 端到端报告 → `output/<时间戳>-<slug>.{md,bib,json}` |
 | `/papers [rm <id>\|--all]` · `/papers open` · `/index` · `/mcp` | 论文 / 索引 / MCP 工具；`open` 起本地预览，用浏览器看抓到的 PDF（见下）；`close` 停服务 |
@@ -146,6 +146,12 @@ python -m src.paper_agent embed dashscope --model text-embedding-v4
 - 渠道返回 `429` 会提示进 polite pool（`/channels add openalex --email you@example.com`）；返回 `401/403` 或需要 key 时会**直接引导配置**。
 - `/ingest --ids ...` 按 ID 直抓，不经过搜索与渠道启用。
 
+**没有 PDF 直链时**不会直接放弃，入库按四级降级（结果里的 `status` 会说明用了哪级）：
+`indexed`（PDF 全文）→ `web`（落地页/百科/维基/新闻等网页正文）→ `abstract`（仅摘要）→ `metadata`（仅书目题录）。
+后两级会在 chunk 里写入「[仅摘要/仅题录（未获取全文）]」标注，引用上下文也会显式提醒模型，避免被当成论文原文证据。
+补链依次尝试 `arxiv.org/pdf/<id>` → Unpaywall → OpenAlex → 落地页 `citation_pdf_url` / `.pdf` 链接（配 `UNPAYWALL_EMAIL` 覆盖更全）。
+用 `PDF_LOOKUP=0` / `WEB_FALLBACK=0` / `RECORD_FALLBACK=0` 可分别关掉补链、网页正文、题录兜底。
+
 抓取顺序：`--source auto`（默认）= MCP 优先，不可用/无结果回退内置 HTTP；`mcp` / `builtin` / `all`（两者合并）。
 
 ## 项目结构
@@ -188,13 +194,15 @@ src/paper_agent/
 | `PAPER_AGENT_LOG_DIR` / `PAPER_AGENT_LOG_LEVEL` | `logs` / `DEBUG` | 日志目录（项目内，按天分文件）与文件级别；`PAPER_AGENT_LOG_KEEP_DAYS`（默认 14）、`PAPER_AGENT_LOG_MAX_MB`（默认 8，超出续写 `-02`）；`PAPER_AGENT_LOG_DISABLE=1` 关文件日志；`PAPER_AGENT_LOG_FILE` 改成固定单文件 |
 | `PAPER_AGENT_PDF_IDLE_MIN` | 30 | 本地 PDF 预览服务空闲多少分钟自动退出（0 = 不自动退出） |
 | `OPENALEX_MAILTO` | 空 | 进 OpenAlex/Crossref polite pool（更稳） |
+| `UNPAYWALL_EMAIL` | 空 | 无直链时用 Unpaywall 补链查 OA 全文（留空则退回 `OPENALEX_MAILTO`） |
+| `PDF_LOOKUP` / `WEB_FALLBACK` / `RECORD_FALLBACK` | `true` | 无 PDF 直链时的三级兜底：补链 / 抓网页正文 / 入库题录·摘要（`WEB_TEXT_MIN_CHARS` 默认 400，网页正文短于此判为无效） |
 
 完整清单见 `.env.example`。
 
 ## 测试
 
 ```bash
-python -m pytest          # 428 passed，全部离线（假模型 / 假 embedding / 假 MCP server）
+python -m pytest          # 453 passed，全部离线（假模型 / 假 embedding / 假 MCP server）
 python -m mypy src main.py
 ```
 

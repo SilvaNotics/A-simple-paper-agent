@@ -42,6 +42,9 @@ from ...core.utils import clean_pasted, flag_bool, split_args
 
 from ..base import ReplBase
 
+# manifest 里的内容级别 → 表格展示（非 PDF 的行一眼能看出只入库了网页/摘要/题录）
+_KIND_LABELS = {"pdf": "PDF", "web": "网页", "abstract": "仅摘要", "metadata": "仅题录"}
+
 
 class PaperCommands(ReplBase):
     """论文库 / 索引 / 本地 PDF 预览 / 日志 / 历史相关命令（`Repl` 的 mixin）。"""
@@ -67,12 +70,14 @@ class PaperCommands(ReplBase):
         table = Table(title=f"已入库论文（{len(papers)} 篇）")
         table.add_column("paper_id", style="cyan", no_wrap=True)
         table.add_column("chunks", justify="right")
+        table.add_column("类型", justify="center")
         table.add_column("年份", justify="right")
         table.add_column("标题")
         for item in papers:
             table.add_row(
                 item["paper_id"],
                 str(item.get("n_chunks", 0)),
+                _KIND_LABELS.get(str(item.get("kind") or "pdf"), str(item.get("kind") or "")),
                 str(item.get("published", ""))[:4],
                 str(item.get("title", ""))[:80],
             )

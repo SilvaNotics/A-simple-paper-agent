@@ -20,6 +20,7 @@ from rich.table import Table
 
 from .core.config import Settings, get_settings
 from .core.logging import resolve_log_file, setup_logging
+from .core.schema import INDEXED_STATUSES, INGEST_STATUS_STYLES
 from .pdf.server import DEFAULT_PORT as PDF_DEFAULT_PORT
 from .pdf.server import collect_pdf_entries, registered_server, start_viewer, stop_registered_server
 
@@ -129,8 +130,9 @@ def search(
         selected = papers if ingest <= 0 else papers[:ingest]
         results = _run(ingest_papers(selected, session=session))
         for info in results:
+            style = INGEST_STATUS_STYLES.get(info["status"], "yellow")
             console.print(
-                f"[green]{info['status']:>11}[/green] {info['paper_id']}  {info['chunks']} chunks  {info['message']}"
+                f"[{style}]{info['status']:>11}[/{style}] {info['paper_id']}  {info['chunks']} chunks  {info['message']}"
             )
         console.print(f"完成：{len(results)} 篇已处理，索引 {session.index.chunk_count} chunks")
 
@@ -175,12 +177,12 @@ def ingest(
         console.print("[yellow]没有可入库的论文[/yellow]")
         raise typer.Exit(code=3)
     for info in results:
-        style = {"indexed": "green", "cached": "cyan"}.get(info["status"], "yellow")
+        style = INGEST_STATUS_STYLES.get(info["status"], "yellow")
         console.print(
             f"[{style}]{info['status']:>11}[/{style}] {info['paper_id']}  "
             f"{info['chunks']} chunks  {info['message']}",
         )
-    ok = sum(1 for r in results if r["status"] in {"indexed", "cached"})
+    ok = sum(1 for r in results if r["status"] in INDEXED_STATUSES)
     console.print(f"完成：{ok}/{len(results)} 篇可用于 RAG 分析")
 
 

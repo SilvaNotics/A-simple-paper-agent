@@ -180,6 +180,25 @@ def merge_dicts(left: dict | None, right: dict | None) -> dict:
 
 
 # --------------------------------------------------------------------------
+# 入库状态
+# --------------------------------------------------------------------------
+
+# 入库结果状态 → 是否已进入 RAG 索引（chunks > 0）。
+# - indexed：PDF 全文；web：网页正文；abstract/metadata：摘要/题录（非全文，已标注）
+# - cached：索引中已存在；no_pdf/parse_error/empty/embed_error：未能入库
+INDEXED_STATUSES = frozenset({"indexed", "cached", "web", "abstract", "metadata"})
+
+# 终端（rich）打印用的状态配色
+INGEST_STATUS_STYLES = {
+    "indexed": "green",
+    "web": "green",
+    "abstract": "green",
+    "metadata": "green",
+    "cached": "cyan",
+}
+
+
+# --------------------------------------------------------------------------
 # 图状态
 # --------------------------------------------------------------------------
 

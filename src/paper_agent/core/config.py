@@ -121,6 +121,12 @@ class Settings(BaseSettings):
     channel_concurrency: int = 6      # 全渠道并发上限
     channel_timeout: float = 25.0     # 单渠道超时（秒），避免慢源拖垮整次检索
     openalex_mailto: str = ""         # 填邮箱进 OpenAlex/Crossref 的 polite pool
+    # ---------------- 全文获取兜底（没有 PDF 直链时） ----------------
+    # 入库顺序：补链（Unpaywall/OpenAlex/落地页）→ 网页正文 → 题录/摘要，逐级降级。
+    pdf_lookup: bool = True           # 没直链时用 Unpaywall/OpenAlex/落地页再找一次
+    web_fallback: bool = True         # 补不到 PDF 时抓网页正文入库（Wikipedia/百科/新闻页）
+    record_fallback: bool = True      # 连网页都没有时把题录/摘要入库（明确标注「非全文」）
+    web_text_min_chars: int = 400     # 网页正文短于该长度视为无效（导航页/占位页）
     http_timeout: float = 30.0
     http_user_agent: str = ""         # 留空用内置 UA
     arxiv_min_interval: float = 3.0   # arXiv 要求请求间隔 ≥3s
@@ -143,7 +149,7 @@ class Settings(BaseSettings):
     arxiv_mcp_bin: str = ""       # 留空则用当前解释器同目录下的 console script
     paper_search_mcp_bin: str = ""
     semantic_scholar_api_key: SecretStr | None = None
-    unpaywall_email: str = ""
+    unpaywall_email: str = ""        # Unpaywall 补链用的邮箱（留空则退回 openalex_mailto）
     # paper-search `search_papers` 的默认源。默认空：由 `/channels` 启用的渠道决定；
     # 仅当需要固定一组源时才设（显式列出可避免默认 `all` 触发 429 / 慢源）。
     mcp_default_sources: str = ""

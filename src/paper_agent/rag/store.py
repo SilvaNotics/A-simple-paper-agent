@@ -116,7 +116,14 @@ class PaperIndex:
         )
 
     # ---------------- 写入 ----------------
-    def add_documents(self, docs: Iterable[Document], paper: Paper | None = None, pdf: Path | None = None) -> int:
+    def add_documents(
+        self,
+        docs: Iterable[Document],
+        paper: Paper | None = None,
+        pdf: Path | None = None,
+        kind: str = "pdf",
+    ) -> int:
+        """写入一批 chunk；`kind` 记内容级别（pdf/web/abstract/metadata），供 /papers 与引用区分全文与书目。"""
         docs = [d for d in docs if d.page_content.strip()]
         if not docs:
             return 0
@@ -140,6 +147,7 @@ class PaperIndex:
                 "n_chunks": int(entry.get("n_chunks", 0)) + len(docs),
                 "ids": sorted(set(entry.get("ids", [])) | set(ids)),
                 "pdf": str(pdf) if pdf else entry.get("pdf", ""),
+                "kind": kind,
                 "sha256": _sha256(pdf) or entry.get("sha256", ""),
             }
         )

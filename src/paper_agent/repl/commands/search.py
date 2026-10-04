@@ -24,6 +24,7 @@ from ...pipeline.session import ask as pipeline_ask, ingest_papers, run_ingest, 
 from ..ui import SearchProgressView, nullcontext
 from ..tui import ask_line, read_secret
 from ...sources.userconfig import UserConfig
+from ...core.schema import INGEST_STATUS_STYLES
 from ...core.utils import clean_pasted, flag_bool, split_args
 
 from ..base import ReplBase
@@ -151,7 +152,7 @@ class SearchCommands(ReplBase):
             ui.console.print("[yellow]没有可入库的论文[/yellow]")
             return
         for info in results:
-            style = {"indexed": "green", "cached": "cyan"}.get(info["status"], "yellow")
+            style = INGEST_STATUS_STYLES.get(info["status"], "yellow")
             ui.console.print(
                 f"[{style}]{info['status']:>11}[/{style}] {info['paper_id']}  {info['chunks']} chunks  {info['message']}"
             )
@@ -185,7 +186,7 @@ class SearchCommands(ReplBase):
             ui.console.print("[yellow]没有可入库的论文[/yellow]")
             return
         for info in results:
-            style = {"indexed": "green", "cached": "cyan"}.get(info["status"], "yellow")
+            style = INGEST_STATUS_STYLES.get(info["status"], "yellow")
             ui.console.print(
                 f"[{style}]{info['status']:>11}[/{style}] {info['paper_id']}  {info['chunks']} chunks  {info['message']}"
             )

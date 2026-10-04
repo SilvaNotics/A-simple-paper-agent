@@ -63,6 +63,14 @@ def format_context(docs: list[Document], collector: CitationCollector) -> str:
         header = f"[{cid}] {meta.get('paper_id', '?')}"
         if meta.get("page"):
             header += f" p.{meta['page']}"
+        # 非全文来源要显式标注：模型（和读者）不能把书目/摘要当成论文原文证据
+        kind = meta.get("kind")
+        if kind in {"web", "abstract", "metadata"}:
+            header += {
+                "web": "（网页正文）",
+                "abstract": "（仅摘要，无全文）",
+                "metadata": "（仅题录，无全文）",
+            }[kind]
         if meta.get("title"):
             header += f" — {truncate(meta['title'], 80)}"
         blocks.append(f"{header}\n{doc.page_content}")

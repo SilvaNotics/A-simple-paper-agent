@@ -40,6 +40,7 @@ from ..rag.retriever import (
 from ..rag.store import PaperIndex
 from ..pipeline.report import build_bibtex, render_report
 from ..core.schema import (
+    INDEXED_STATUSES,
     Paper,
     ResearchState,
     SelectionOutput,
@@ -507,7 +508,7 @@ def make_verify_node():
         problems.extend(state.get("worker_errors", []))
 
         for info in state.get("ingest_results", []):
-            if info.get("status") in {"indexed", "cached"}:
+            if info.get("status") in INDEXED_STATUSES:
                 continue
             problems.append(
                 f"论文 {info.get('paper_id', '?')} 未能入库（{info.get('status')}）："

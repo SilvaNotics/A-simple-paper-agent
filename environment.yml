@@ -40,6 +40,8 @@ dependencies:
       - numpy                           # langchain-core 内存向量库算余弦相似度需要（隐式依赖）
       - pymupdf>=1.28                   # PDF 解析首选（实测质量优于 pdfplumber）
       - pdfplumber>=0.11                # PDF 解析回退
+      - beautifulsoup4>=4.12            # HTML 处理：落地页找 PDF 直链 + 网页正文抽取
+      - lxml>=5                         # bs4 优先用的解析器（缺失时自动退回 html.parser）
       - rich>=13
       - typer>=0.12
 
