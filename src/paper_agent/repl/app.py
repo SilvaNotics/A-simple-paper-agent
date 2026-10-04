@@ -343,6 +343,14 @@ class Repl(SearchCommands, PaperCommands, ProviderCommands):
         loop = self._loop
         self._loop = None
         if loop is not None and not loop.is_closed():
+            # 先收掉仍挂起的异步生成器（langchain/httpx 流式响应内部的
+            # `Response.aiter_bytes` 等）。直接 `close()` 会清空 `_ready` 队列，
+            # 丢弃它们排队的 `aclose()` 回调，解释器退出时报：
+            # "coroutine method 'aclose' of 'Response.aiter_bytes' was never awaited"
+            try:
+                loop.run_until_complete(loop.shutdown_asyncgens())
+            except Exception:  # noqa: BLE001
+                pass
             try:
                 loop.close()
             except Exception:  # noqa: BLE001
