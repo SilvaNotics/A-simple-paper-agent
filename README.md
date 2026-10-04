@@ -3,7 +3,7 @@
 纯 Python + LangChain：**联网检索论文 → 下载 OA 全文 → RAG 带引用问答 → 多 agent 出调研报告**。
 
 - 实现原理与各文件职责：[`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md)
-- 设计与演进记录：[`docs/PLAN.md`](docs/PLAN.md)
+- 设计与演进记录：[`docs/history/PLAN.md`](docs/history/PLAN.md)
 - 依赖：[`requirements.txt`](requirements.txt)（精确全量）· [`environment.yml`](environment.yml)（直接依赖）
 - 环境变量模板：[`.env.example`](.env.example)（可直接复制为 `.env`）
 
@@ -44,9 +44,12 @@ python -m src.paper_agent mcp-tools    # MCP server 与工具白名单（可选�
 | 路径 | 内容 |
 |---|---|
 | `.paper-agent/config.json` | `/connect` 的供应商/渠道配置（0600，已被 gitignore，随项目移植） |
+| `.paper-agent/pdf-server.json` | 本地 PDF 预览服务的注册信息（pid/端口/URL，服务停止即删） |
+| `.paper-agent/history*` | 命令行历史（项目内，随项目移植） |
 | `data/papers/` | **论文库**：下载的 OA 全文 PDF 缓存 |
 | `data/index/`、`data/by-embedding/<签名>/` | 向量索引（按 embedding 签名隔离） |
 | `output/` | **报告默认保存位置**：`<时间戳>-<slug>.md` + `.bib` + `.json`；`/save` 的会话也存这里 |
+| `logs/paper-agent-YYYY-MM-DD.log` | **运行日志**（项目内，**按天分文件**）：控制台只显示 WARNING，INFO/DEBUG 都在这里；自动保留最近 14 天（`PAPER_AGENT_LOG_KEEP_DAYS`），单日超过 8 MiB 续写 `-02`；REPL 里 `/logs` 看末尾、`/logs --files` 看历史 |
 
 ## 使用
 
@@ -69,12 +72,48 @@ python main.py --offline               # 假模型 + 独立索引目录（无密
 | `/ingest <词> [--limit N] [--ids arxiv:xxx] [--force]` | 下载入库，建立/更新索引 |
 | `/ask <问题> [--papers a,b] [--k N]` | 带引用问答（默认流式） |
 | `/report <主题> [--papers N] [--simple]` | 端到端报告 → `output/<时间戳>-<slug>.{md,bib,json}` |
-| `/papers [rm <id>\|--all]` · `/index` · `/mcp` | 论文 / 索引 / MCP 工具 |
+| `/papers [rm <id>\|--all]` · `/papers open` · `/index` · `/mcp` | 论文 / 索引 / MCP 工具；`open` 起本地预览，用浏览器看抓到的 PDF（见下）；`close` 停服务 |
 | `/channels [add\|rm\|key-rm\|on\|off\|all on\|domestic on]` | **搜索渠道配置**（见下） |
 | `/connect` · `/models` · `/providers` · `/model` · `/embed` · `/keys` | 供应商与模型（`/embed` 单独指定 RAG embedding） |
-| `/offline [on\|off]` · `/stream [on\|off]` · `/history` · `/save` · `/clear` · `/exit` | 会话管理 |
+| `/offline [on\|off]` · `/stream [on\|off]` · `/history` · `/save` · `/logs [n] [--files]` · `/clear` · `/exit` | 会话管理（`/logs` 看今天日志末尾，`/logs --files` 列历史日志文件） |
 
 交互特性：Tab 补全 + 历史；`/models` 输入即筛选（Enter 本次使用、Ctrl+C 设为默认、Ctrl+P 换供应商）；流式输出 append-only（不重绘）；单条命令报错/`Ctrl-C` 不退出会话；支持管道 `printf '/index\n/exit\n' | python main.py`。
+
+#### 用浏览器看抓到的 PDF（`/papers open`）
+
+```bash
+/papers open                  # 终端打印 http://127.0.0.1:8765/，并尝试自动开浏览器
+/papers open --port 9000      # 指定端口（被占用时自动换空闲端口）
+/papers open --idle-timeout 0 # 关闭「空闲自动退出」（默认 30 分钟）
+/papers open --no-browser     # 只打印地址，不自动开浏览器
+/papers close                 # 停服务（包括别的进程起的那个）
+```
+
+也可以不经 REPL，直接当命令行工具用（适合放到后台/开机脚本）：
+
+```bash
+python -m src.paper_agent papers-open            # 起服务，Ctrl+C 退出
+python -m src.paper_agent papers-open -p 9000 --idle 0 --no-browser
+python -m src.paper_agent papers-close           # 停掉正在跑的服务（含其它进程）
+```
+
+服务只监听 `127.0.0.1`，页面左侧列出 `data/papers/` 里的全部 PDF（标题 / 年份 / chunks / 大小，可按关键词过滤），点击即在右侧内嵌阅读；支持 `Range` 请求，大文件拖动不卡。**在远程机器上**用 SSH 端口转发即可在本地浏览器打开：
+
+```bash
+ssh -L 8765:127.0.0.1:8765 <user>@<远程主机>
+# 然后本地浏览器打开 http://127.0.0.1:8765/
+```
+
+新入库的论文刷新页面即可看到（列表每次请求都重新扫描），不需要重启服务。
+
+**退出机制（四层，总有一条能用）**：
+
+| 方式 | 说明 |
+|---|---|
+| 页面右下角「停止预览服务」 | POST `/shutdown`，带启动时随机生成的 token（防其它本地页面误关）；关掉页面**不会**退服务 |
+| `/papers close` · `papers-close` | REPL 内/命令行都行；本进程起的直接停，注册在案的**别的进程**用 SIGTERM 停 |
+| 进程退出 | `atexit` + `SIGTERM` 处理，Ctrl+C / `kill` / REPL 退出都会收尾并清注册信息 |
+| 空闲自动退出 | 默认 30 分钟无请求自己停（`--idle-timeout MIN` 或 `PAPER_AGENT_PDF_IDLE_MIN`，0 = 关闭） |
 
 ### 脚本式 CLI（`python -m src.paper_agent`）
 
@@ -123,6 +162,8 @@ python -m src.paper_agent embed dashscope --model text-embedding-v4
 | `LLM_TIMEOUT` / `SEARCH_TIMEOUT` | 180 | 单次等待上限 / 一次检索总超时（秒） |
 | `SEARCH_USE_LLM` | `true` | 检索时用 LLM 做查询扩展 + 重排（`--no-llm` 可关） |
 | `PAPER_AGENT_THEME` | `dark` | 界面配色 `dark` / `light` / `none` |
+| `PAPER_AGENT_LOG_DIR` / `PAPER_AGENT_LOG_LEVEL` | `logs` / `DEBUG` | 日志目录（项目内，按天分文件）与文件级别；`PAPER_AGENT_LOG_KEEP_DAYS`（默认 14）、`PAPER_AGENT_LOG_MAX_MB`（默认 8，超出续写 `-02`）；`PAPER_AGENT_LOG_DISABLE=1` 关文件日志；`PAPER_AGENT_LOG_FILE` 改成固定单文件 |
+| `PAPER_AGENT_PDF_IDLE_MIN` | 30 | 本地 PDF 预览服务空闲多少分钟自动退出（0 = 不自动退出） |
 | `OPENALEX_MAILTO` | 空 | 进 OpenAlex/Crossref polite pool（更稳） |
 
 完整清单见 `.env.example`。
@@ -130,7 +171,7 @@ python -m src.paper_agent embed dashscope --model text-embedding-v4
 ## 测试
 
 ```bash
-python -m pytest          # 300 passed，全部离线（假模型 / 假 embedding / 假 MCP server）
+python -m pytest          # 422 passed，全部离线（假模型 / 假 embedding / 假 MCP server）
 python -m mypy src main.py
 ```
 
@@ -141,12 +182,18 @@ python -m mypy src main.py
 | 现象 | 处理 |
 |---|---|
 | `/connect` 粘贴 key 后 401 | key 读入会回显脱敏结果确认真假；重新 `/connect` 覆盖更新 |
+| `/ingest --ids arxiv:xxxx` 报「解析失败」 | 先看日志：arXiv **元数据** API 限流（429）时会自动降级用 `arxiv.org/pdf/<id>` 直链抓 PDF，标题从 PDF 首页补；若仍失败才是 ID 写错/无 OA 全文 |
 | 检索「只启用了 X 却返回别的源」 | 已按 `/channels` 严格收敛；若仍如此，请**重启 REPL**（长驻进程不会热加载源码） |
 | `429` / `403` | 面向 OpenAlex/Crossref 配 `OPENALEX_MAILTO`；需要登录的渠道按提示 `/channels add` 配置 |
 | embedding `batch size is invalid` | 调小 `EMBED_BATCH_SIZE`（已内置自动降批） |
 | `IndexSignatureError` | 换了 embedding 模型/维度 → 自动用新目录；要用旧索引就换回原模型 |
 | 引用校验误报 | 校验是启发式的，可调低 `MIN_SUPPORT_RATIO` |
 | MCP 日志刷 Semantic Scholar 429 | 未配 `SEMANTIC_SCHOLAR_API_KEY` 时该源不暴露；配 key 后自动启用 |
+| 交互追问（`/connect`、y/N 确认）时按了 `Ctrl+D` | 视为「取消当前操作」并回到提示符（不会打 traceback、不会写入配置）；整行留空亦然 |
+| 想知道为什么回退/失败但终端没显示 | 日志全量写在项目内 `logs/paper-agent-YYYY-MM-DD.log`（**按天分文件**，默认 DEBUG，保留 14 天）：REPL 里 `/logs 50` 看今天末尾、`/logs --files` 找更早的文件 |
+| `/papers open` 打印的地址在本地浏览器打不开 | 服务只绑 `127.0.0.1`：远程机器先 `ssh -L <port>:127.0.0.1:<port> <host>` 转发；确实要在内网直连再加 `--host 0.0.0.0` |
+| `/papers open` 报 `gio: http://127.0.0.1:8765/: Operation not supported` | 旧版本用 stdlib `webbrowser`，本机只有 `gio` 时会在无桌面环境（服务器 / SSH / 容器）失败并把错误打到终端。现在改为按 `$BROWSER` → `xdg-open` → `wslview` → `gio` … 逐个试启动器并丢弃输出，全失败只提示手动打开（`--no-browser` 可静默）；要在远程机器上开浏览器就用上面的 `ssh -L` |
+| 预览服务忘了关 / 端口被占用 | `/papers close`（或 `python -m src.paper_agent papers-close`）会停掉**任何进程**注册在案的服务；默认空闲 30 分钟也会自动退，`PAPER_AGENT_PDF_IDLE_MIN=0` 才关掉这个保护 |
 
 ## 已知限制
 

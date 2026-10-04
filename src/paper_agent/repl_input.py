@@ -4,7 +4,7 @@
 用 `prompt_toolkit` 实现：
 - 边输入边弹列表（含说明），可滚动；`Tab` 补全、`Enter` 确认并执行；
 - 支持参数级补全：`--flag`、供应商名、模型名、已入库论文 ID；
-- 底部状态栏常驻显示「供应商 · 模型 · 索引规模」；历史存 `~/.paper_agent_history.ptk`。
+- 底部状态栏常驻显示「供应商 · 模型 · 索引规模」；历史存项目内 `.paper-agent/history.ptk`。
 
 未安装 `prompt_toolkit` 时自动退化为 `rich` + 标准输入。
 """
@@ -16,8 +16,9 @@ import os
 import re
 import sys
 from dataclasses import dataclass, field
-from pathlib import Path
-from typing import Callable, Iterable
+from typing import Callable
+
+from .config import PTK_HISTORY_FILE
 
 logger = logging.getLogger(__name__)
 
@@ -30,7 +31,7 @@ try:  # 避免任何导入异常影响输入层
 except Exception:  # noqa: BLE001  # pragma: no cover
     CHANNEL_KINDS = []
 
-HISTORY_PATH = Path.home() / ".paper_agent_history.ptk"
+HISTORY_PATH = PTK_HISTORY_FILE
 
 # ---------------------------------------------------------------------------
 # 界面主题（补全菜单 / 命令面板 / 底部状态栏）
@@ -125,7 +126,7 @@ COMMAND_FLAGS: dict[str, tuple[str, ...]] = {
     "/ingest": ("--limit", "--ids", "--force", "--source"),
     "/ask": ("--papers", "--k"),
     "/report": ("--papers", "--simple", "--source"),
-    "/papers": ("rm", "--all"),
+    "/papers": ("rm", "--all", "open", "close", "--port", "--host", "--idle-timeout", "--no-browser"),
     "/channels": ("add", "rm", "key-rm", "on", "off", "all", "domestic", "list"),
     "/keys": ("rm",),
     "/connect": ("--key", "--name", "--kind", "--no-fetch", "--allow-empty-key"),
@@ -161,6 +162,12 @@ FLAG_DOCS: dict[str, str] = {
     "--provider": "指定供应商（不给值则弹出选择器）",
     "--refresh": "重新拉取模型列表",
     "--default": "同时写入默认",
+    "--port": "预览服务端口（默认 8765，被占用自动换空闲端口）",
+    "--host": "预览服务监听地址（默认仅本机 127.0.0.1）",
+    "--idle-timeout": "预览服务空闲多少分钟后自动退出（0 = 不自动退出）",
+    "--no-browser": "起服务但不自动打开浏览器",
+    "open": "起本地 PDF 预览服务（浏览器看抓到的 PDF）",
+    "close": "停掉本地 PDF 预览服务",
     "auto": "自动挑选 / 恢复自动",
     "set": "交互选择",
     "use": "切换默认供应商",
@@ -308,6 +315,8 @@ def create_session(ctx: PaletteContext):
         from prompt_toolkit.styles import Style
 
         kb = confirm_key_bindings()   # Tab/Enter 都是确定（Tab 先补全、已是该项则执行）
+
+        HISTORY_PATH.parent.mkdir(parents=True, exist_ok=True)
 
         style = build_style() or Style.from_dict(
             {"prompt": "ansicyan bold", "bottom-toolbar": "bg:#0b1116 #60a5fa"}
@@ -680,7 +689,7 @@ def pick_value(
         return ACTION_CANCEL, ""
 
 
-def confirm_key_bindings(menu_aliases: tuple[str, ...] = ()):  # noqa: ANN201
+def confirm_key_bindings():  # noqa: ANN201
     """构造「Tab/Enter 都是确定」的按键绑定（供选择器与命令面板共用）。
 
     语义：

@@ -10,6 +10,7 @@ import asyncio
 import json
 import logging
 import sys
+import time
 from pathlib import Path
 
 import typer
@@ -18,6 +19,9 @@ from rich.markdown import Markdown
 from rich.table import Table
 
 from .config import Settings, get_settings
+from .logging_setup import resolve_log_file, setup_logging
+from .pdf_server import DEFAULT_PORT as PDF_DEFAULT_PORT
+from .pdf_server import collect_pdf_entries, registered_server, start_viewer, stop_registered_server
 
 app = typer.Typer(
     add_completion=False,
@@ -27,26 +31,14 @@ console = Console()
 
 
 def _setup_logging(verbose: bool) -> None:
-    logging.basicConfig(
-        level=logging.DEBUG if verbose else logging.INFO,
-        format="%(asctime)s %(levelname)s %(name)s | %(message)s",
-        datefmt="%H:%M:%S",
+    """配置日志：控制台 + **项目内**轮转文件 `logs/paper-agent.log`（见 logging_setup）。
+
+    CLI 控制台默认 INFO（`-v` 为 DEBUG），文件始终按 DEBUG 记录，便于事后排查。
+    """
+    setup_logging(
+        verbose=verbose,
+        console_level=logging.DEBUG if verbose else logging.INFO,
     )
-    if not verbose:
-        for noisy in (
-            "httpx",
-            "httpx2",
-            "httpcore",
-            "mcp",
-            "urllib3",
-            "asyncio",
-            "openai",
-            "arxiv",
-            "langchain",
-            "langchain_mcp_adapters",
-            "langsmith",
-        ):
-            logging.getLogger(noisy).setLevel(logging.WARNING)
 
 
 def cli_settings(offline: bool = False, out: Path | None = None, max_papers: int | None = None) -> Settings:
@@ -523,6 +515,80 @@ def keys(
 
 
 # --------------------------------------------------------------------------
+# 本地 PDF 预览（可独立起服务；退出机制见 pdf_server 模块说明）
+# --------------------------------------------------------------------------
+
+
+def _manifest_rows(index_dir: Path) -> list[dict]:
+    """直接读索引 manifest 里的论文行（不加载 embedding、不联网）——供独立命令用。"""
+    import json as _json
+
+    try:
+        manifest = _json.loads((index_dir / "manifest.json").read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return []
+    papers = manifest.get("papers") if isinstance(manifest, dict) else None
+    if not isinstance(papers, dict):
+        return []
+    return [{"paper_id": pid, **(info if isinstance(info, dict) else {})} for pid, info in papers.items()]
+
+
+@app.command("papers-open")
+def papers_open(
+    port: int = typer.Option(PDF_DEFAULT_PORT, "--port", "-p", help="监听端口（被占用会自动换空闲端口）"),
+    host: str = typer.Option("127.0.0.1", "--host", help="监听地址（默认只本机；0.0.0.0 = 同网段可访问）"),
+    idle: float = typer.Option(-1.0, "--idle", help="空闲多少分钟自动退出（0 = 不自动退出；默认读 PAPER_AGENT_PDF_IDLE_MIN，30）"),
+    no_browser: bool = typer.Option(False, "--no-browser", help="不要自动打开浏览器"),
+) -> None:
+    """起一个本地 HTTP 服务，用浏览器看 `data/papers/` 里抓到的 PDF（Ctrl+C 退出）。
+
+    - 页面右下角「停止预览服务」、`papers-open --stop` 都能停；
+    - 默认空闲 30 分钟自动退出；
+    - 终端会打印地址与 `ssh -L` 端口转发命令。
+    """
+    _setup_logging(False)
+    s = get_settings()
+    existing = registered_server()
+    if existing is not None:
+        console.print(f"[yellow]已有预览服务在跑：[/yellow]{existing.get('url')}")
+        console.print("[dim]停掉它：papers-open --stop（或页面上的「停止预览服务」）[/dim]")
+        raise typer.Exit(code=0)
+    rows = _manifest_rows(s.index_dir)
+    try:
+        server = start_viewer(
+            lambda: collect_pdf_entries(s.papers_dir, rows),
+            papers_dir=s.papers_dir,
+            host=host,
+            port=port,
+            idle_seconds=None if idle < 0 else max(idle, 0.0) * 60,
+            open_browser=not no_browser,
+            console=console,
+        )
+    except OSError as exc:
+        console.print(f"[red]无法启动预览服务（{host}:{port}）：{exc}[/red]")
+        raise typer.Exit(code=4) from exc
+    console.print("[dim]按 Ctrl+C 退出；服务日志会写进项目内 logs/[/dim]")
+    try:
+        while server.running:
+            time.sleep(0.5)
+    except KeyboardInterrupt:
+        console.print("\n[dim]已中断[/dim]")
+    finally:
+        server.stop()
+    console.print("[green]✓[/green] 预览服务已停止")
+
+
+@app.command("papers-close")
+def papers_close() -> None:
+    """停掉正在跑的 PDF 预览服务（含**其它进程**起的那个）。"""
+    entry = stop_registered_server()
+    if entry is None:
+        console.print("[dim]没有注册在案的 PDF 预览服务[/dim]")
+        return
+    console.print(f"[green]✓[/green] 已停止预览服务（pid={entry.get('pid')} port={entry.get('port')}）")
+
+
+# --------------------------------------------------------------------------
 # 自检
 # --------------------------------------------------------------------------
 
@@ -578,7 +644,8 @@ def selftest(verbose: bool = typer.Option(False, "--verbose", "-v")) -> None:
 
     s = get_settings()
     console.print(f"[bold]配置[/bold] model={s.qwen_model} embedding={s.embedding_model} fake_llm={s.fake_llm}")
-    console.print(f"[bold]数据[/bold] {s.data_dir} | [bold]输出[/bold] {s.output_dir}")
+    console.print(f"[bold]数据[/bold] {s.data_path} | [bold]输出[/bold] {s.output_path}")
+    console.print(f"[bold]日志[/bold] {resolve_log_file()}")
 
     if not s.fake_llm:
         try:

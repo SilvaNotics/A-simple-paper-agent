@@ -57,6 +57,13 @@ async def ingest_paper(
         result.update(status="parse_error", message=f"解析失败 {type(exc).__name__}: {exc}")
         return result
 
+    if not paper.title and parsed.title:
+        # 元数据缺失（如 arXiv 元数据 API 限流，只凭 PDF 直链抓到）：用首页文本补个标题，
+        # 否则 /papers、报告、引用里就只能看到裸的 paper_id。
+        paper = paper.model_copy(update={"title": parsed.title})
+        result["title"] = parsed.title
+        logger.info("论文 %s 无标题元数据，改用 PDF 首页文本：%s", paper.paper_id, truncate_text(parsed.title, 80))
+
     docs = split_paper(paper, parsed, s)
     if not docs:
         result.update(status="empty", message="解析成功但没有可用文本（可能是扫描版）")

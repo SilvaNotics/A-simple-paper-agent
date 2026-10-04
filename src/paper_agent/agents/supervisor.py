@@ -40,12 +40,9 @@ from ..rag.retriever import (
 from ..rag.store import PaperIndex
 from ..report import build_bibtex, render_report
 from ..schema import (
-    Answer,
     Paper,
-    PaperSummary,
     ResearchState,
     SelectionOutput,
-    merge_dicts,
 )
 from ..tools.paper_tools import ingest_paper, make_paper_tools
 from ..tools.rag_tools import make_rag_tools
@@ -491,7 +488,7 @@ def make_write_node(deps: Deps):
     return write
 
 
-def make_verify_node(deps: Deps):
+def make_verify_node():
     async def verify(state: ResearchState) -> dict[str, Any]:
         problems: list[str] = []
         answers = list((state.get("answers") or {}).values())
@@ -561,7 +558,6 @@ def route_after_verify(state: ResearchState):
 def build_graph(
     deps: Deps,
     checkpointer: Any | None = None,
-    use_checkpoint_sqlite: bool = False,
 ):
     """构建并编译监督图。
 
@@ -582,7 +578,7 @@ def build_graph(
     g.add_node("collect_answers", _pass_through("问答完成"))
     g.add_node("no_papers", _no_papers)
     g.add_node("write", make_write_node(deps))
-    g.add_node("verify", make_verify_node(deps))
+    g.add_node("verify", make_verify_node())
 
     g.add_edge(START, "plan")
     g.add_conditional_edges("plan", fan_out_search, ["search_one"])

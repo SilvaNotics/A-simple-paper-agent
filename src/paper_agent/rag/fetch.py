@@ -7,13 +7,13 @@
 from __future__ import annotations
 
 import logging
-import re
 from pathlib import Path
 
 import httpx
 
 from ..config import Settings, get_settings
 from ..schema import Paper
+from ..utils import safe_filename
 
 logger = logging.getLogger(__name__)
 
@@ -21,11 +21,10 @@ _UA = (
     "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) "
     "Chrome/124.0 Safari/537.36 paper-agent/0.1 (+academic research)"
 )
-_SAFE = re.compile(r"[^0-9A-Za-z._-]+")
 
-
-def safe_filename(paper_id: str) -> str:
-    return _SAFE.sub("_", paper_id or "unknown")[:120]
+# `safe_filename` 已上收到 utils（纯函数，供 fetch 与 pdf_server 共用）；
+# 这里保留导入，旧写法 `from .rag.fetch import safe_filename` 仍然可用。
+__all__ = ["cached_pdf", "download_pdf", "local_pdf_path", "safe_filename"]
 
 
 def local_pdf_path(paper: Paper, settings: Settings | None = None) -> Path:

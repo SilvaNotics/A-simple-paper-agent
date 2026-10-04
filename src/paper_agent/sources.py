@@ -24,7 +24,7 @@ import httpx
 from .channels import domestic_first, is_domestic, spec_for
 from .config import Settings, get_settings
 from .schema import Paper
-from .utils import clean_pasted, extract_json, first_list, normalize_paper_id
+from .utils import clean_pasted, first_list, normalize_paper_id
 
 logger = logging.getLogger(__name__)
 
@@ -298,16 +298,49 @@ async def search_arxiv(query: str, limit: int = 10, settings: Settings | None = 
 
 
 async def resolve_arxiv(arxiv_id: str, settings: Settings | None = None) -> Paper | None:
-    """按 arXiv ID 精确取元数据 + PDF 直链。"""
+    """按 arXiv ID 精确取元数据 + PDF 直链。
+
+    元数据 API 被限流（429）/超时时**降级**：只凭 ID 给出
+    `https://arxiv.org/pdf/<id>` 直链（标题等元数据在解析 PDF 后补齐），
+    否则「抓得到 PDF 却因为元数据接口 429 而彻底失败」。
+    注意：API 正常但查无此文（ID 写错/已撤稿）仍返回 `None`，不误报。
+    """
     s = settings or get_settings()
     ident = clean_pasted(arxiv_id)
     match = re.search(r"(\d{4}\.\d{4,5})", ident)
     if not match:
         return None
-    await _throttle_arxiv(s)
-    resp = await _request(ARXIV_API, {"id_list": match.group(1)}, s)
-    papers = parse_arxiv_atom(resp.text)
+    try:
+        await _throttle_arxiv(s)
+        resp = await _request(ARXIV_API, {"id_list": match.group(1)}, s)
+        papers = parse_arxiv_atom(resp.text)
+    except Exception as exc:  # noqa: BLE001 - 限流/超时/网络错误都降级，不阻断抓取
+        logger.warning(
+            "arXiv 元数据 API 不可用（%s: %s），降级用直链抓 PDF：arxiv:%s",
+            type(exc).__name__,
+            exc,
+            match.group(1),
+        )
+        return arxiv_fallback_paper(match.group(1))
     return papers[0] if papers else None
+
+
+def arxiv_fallback_paper(arxiv_id: str) -> Paper:
+    """arXiv 元数据缺失时的最小 `Paper`：ID + abs/pdf 直链（不做网络请求）。
+
+    `source="arxiv-pdf"` 标记「只凭直链抓到」，便于日志/排查区分；
+    标题、作者等留空，由 `ingest_paper` 在解析 PDF 后用首页文本补齐。
+    """
+    match = re.search(r"(\d{4}\.\d{4,5})", clean_pasted(arxiv_id))
+    if not match:
+        return Paper()   # 不像 arXiv ID 就不要凭空造一个
+    ident = match.group(1)
+    return Paper(
+        paper_id=f"arxiv:{ident}",
+        pdf_url=f"https://arxiv.org/pdf/{ident}",
+        url=f"https://arxiv.org/abs/{ident}",
+        source="arxiv-pdf",
+    )
 
 
 # --------------------------------------------------------------------------

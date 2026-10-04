@@ -10,9 +10,52 @@ import hashlib
 import json
 import math
 import re
+import shlex
 from typing import Any, Sequence
 
 from langchain_core.embeddings import Embeddings
+
+# --------------------------------------------------------------------------
+# 命令行参数拆分（REPL 各命令共用：`query --limit 3 --force`）
+# --------------------------------------------------------------------------
+
+
+def split_args(raw: str) -> tuple[str, dict[str, str]]:
+    """把 `query --limit 3 --force` 拆成 `(query, {flag: value})`。
+
+    先做粘贴清洗：终端粘贴常带括号粘贴标记/控制字符，会污染 URL、key、模型名。
+    不带值的 `--flag` 记成 `"true"`（用 `flag_bool()` 读布尔值）。
+    """
+    raw = clean_pasted(raw)
+    try:
+        parts = shlex.split(raw)
+    except ValueError:
+        parts = raw.split()
+
+    positional: list[str] = []
+    flags: dict[str, str] = {}
+    i = 0
+    while i < len(parts):
+        token = parts[i]
+        if token.startswith("--"):
+            key = token[2:]
+            if i + 1 < len(parts) and not parts[i + 1].startswith("--"):
+                flags[key] = parts[i + 1]
+                i += 2
+                continue
+            flags[key] = "true"
+        else:
+            positional.append(token)
+        i += 1
+    return " ".join(positional).strip(), flags
+
+
+def flag_bool(flags: dict[str, str], key: str, default: bool = False) -> bool:
+    """读布尔型 flag：`--force` / `--force true` 都算真，`--force off` 算假。"""
+    if key not in flags:
+        return default
+    return flags[key].lower() not in {"false", "0", "no", "off"}
+
 
 # --------------------------------------------------------------------------
 # 论文 ID
@@ -168,16 +211,26 @@ def mask_secret(secret: str | None, head: int = 4, tail: int = 4) -> str:
 
 
 # --------------------------------------------------------------------------
-# 文本处理
+# 文本 / 文件名处理
 # --------------------------------------------------------------------------
 
 _SLUG_BAD = re.compile(r"[^0-9A-Za-z\u4e00-\u9fff]+")
+_FILE_BAD = re.compile(r"[^0-9A-Za-z._-]+")
 
 
 def slugify(text: str, max_len: int = 60) -> str:
     """生成安全的文件名片段（保留中文）。"""
     slug = _SLUG_BAD.sub("-", (text or "").strip()).strip("-")
     return (slug or "untitled")[:max_len]
+
+
+def safe_filename(paper_id: str) -> str:
+    """把 paper_id 变成安全的文件名主干（`/`、`:` 等换成 `_`）。
+
+    论文库里的 PDF 用 `data/papers/<safe_filename(paper_id)>.pdf` 命名；
+    `pdf_server` 也靠同一规则把文件名反查回 paper_id。
+    """
+    return _FILE_BAD.sub("_", paper_id or "unknown")[:120]
 
 
 def truncate(text: str | None, limit: int = 400) -> str:

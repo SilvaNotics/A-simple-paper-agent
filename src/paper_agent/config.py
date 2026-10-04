@@ -15,10 +15,14 @@ from pydantic_settings import BaseSettings, SettingsConfigDict
 # src/paper_agent/config.py -> 仓库根目录
 ROOT_DIR = Path(__file__).resolve().parents[2]
 ENV_FILE = ROOT_DIR / ".env"
+# 项目内本地状态目录（用户配置 + 命令行历史），随项目目录一起移植。
+STATE_DIR = ROOT_DIR / ".paper-agent"
+HISTORY_FILE = STATE_DIR / "history"           # stdlib readline 历史
+PTK_HISTORY_FILE = STATE_DIR / "history.ptk"   # prompt_toolkit 历史
 
 
-def _abs(path: str | Path) -> Path:
-    """把相对路径统一解析到仓库根目录下。"""
+def resolve_path(path: str | Path) -> Path:
+    """把相对路径统一解析到仓库根目录下（绝对路径原样返回）。"""
     p = Path(path).expanduser()
     return p if p.is_absolute() else (ROOT_DIR / p)
 
@@ -103,7 +107,6 @@ class Settings(BaseSettings):
     chunk_size: int = 1200
     chunk_overlap: int = 200
     concurrency: int = 4
-    mcp_timeout: float = 120.0
     # 联网检索来源：auto（先 MCP，失败/为空则用内置 HTTP）/ mcp / builtin
     search_source: str = "auto"
     # 内置回退层源列表。**默认空**：所有渠道都需要用 `/channels add` 手动添加后才参与检索。
@@ -144,12 +147,16 @@ class Settings(BaseSettings):
 
     # ---------------- 路径 ----------------
     # 运行产物相对仓库根解析：论文库 data/papers/，报告（Markdown/BibTeX/JSON）output/。
-    data_dir: Path = Path("data")
-    output_dir: Path = Path("output")
+    # 相对值一律相对仓库根，绝对路径原样使用；支持 PAPER_AGENT_DATA_DIR / PAPER_AGENT_OUTPUT_DIR。
+    data_dir: Path = Field(
+        default=Path("data"), validation_alias=AliasChoices("PAPER_AGENT_DATA_DIR", "DATA_DIR")
+    )
+    output_dir: Path = Field(
+        default=Path("output"), validation_alias=AliasChoices("PAPER_AGENT_OUTPUT_DIR", "OUTPUT_DIR")
+    )
 
     # ---------------- 调试 / 测试 ----------------
     fake_llm: bool = False   # 置 1 用假模型 + 假 embedding：无网络无密钥也能跑通全链路
-    verbose: bool = False
 
     # ------------------------------------------------------------------
     # ---------------- 当前生效的模型信息 ----------------
@@ -187,13 +194,18 @@ class Settings(BaseSettings):
         return bool(self.dashscope_api_key) and not self.llm_base_url
 
     @property
+    def data_path(self) -> Path:
+        """数据根目录：`<仓库根>/data/`（PDF 缓存 + 向量索引）。"""
+        return resolve_path(self.data_dir)
+
+    @property
     def papers_dir(self) -> Path:
         """论文库：`<仓库根>/data/papers/`（下载的 PDF 缓存）。"""
-        return _abs(self.data_dir) / "papers"
+        return self.data_path / "papers"
 
     @property
     def index_dir(self) -> Path:
-        return _abs(self.data_dir) / "index"
+        return self.data_path / "index"
 
     @property
     def index_file(self) -> Path:
@@ -206,11 +218,11 @@ class Settings(BaseSettings):
     @property
     def output_path(self) -> Path:
         """报告输出目录：`<仓库根>/output/`（Markdown + BibTeX + JSON）。"""
-        return _abs(self.output_dir)
+        return resolve_path(self.output_dir)
 
     @property
     def servers_file(self) -> Path:
-        return _abs(self.mcp_servers_file)
+        return resolve_path(self.mcp_servers_file)
 
     def ensure_dirs(self) -> None:
         for p in (self.papers_dir, self.index_dir, self.output_path):

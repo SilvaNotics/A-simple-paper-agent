@@ -26,6 +26,8 @@ class ParsedDoc:
     pages: list[str] = field(default_factory=list)
     engine: str = ""
     truncated_references: bool = False
+    # 从 PDF 里猜出的标题（仅作「元数据缺失」时的兜底，可能为空）
+    title: str = ""
 
     @property
     def text(self) -> str:
@@ -34,6 +36,44 @@ class ParsedDoc:
     @property
     def n_pages(self) -> int:
         return len(self.pages)
+
+
+_ARXIV_STAMP_RE = re.compile(r"^arxiv:\s*\d{4}\.\d{4,5}", re.IGNORECASE)
+_TITLE_BAD_START_RE = re.compile(
+    r"^(?:doi\b|https?://|www\.|\u00a9|copyright\b|preprint\b|proceedings\b|published\b)",
+    re.IGNORECASE,
+)
+
+
+def _plausible_title(candidate: str) -> str:
+    """判断一段文本能不能当标题（过滤水印行 / DOI 行 / 文件名 / 参考文献行）。"""
+    text = _clean(candidate or "").strip(" \t\u00b7\u2022-\u2014")
+    if not 8 <= len(text) <= 300:
+        return ""
+    if _ARXIV_STAMP_RE.match(text) or _TITLE_BAD_START_RE.match(text):
+        return ""
+    if text.lower().endswith(".pdf") or _looks_like_reference(text):
+        return ""
+    letters = sum(1 for ch in text if ch.isalpha())
+    if letters < 6 or letters < len(text) * 0.5:
+        return ""
+    return text
+
+
+def guess_title(first_page: str, meta_title: str = "") -> str:
+    """尽力从 PDF 里猜标题：优先 PDF 内嵌元数据，其次首页第一行「像标题」的文本。
+
+    只用于元数据缺失时的兜底（如 arXiv 元数据 API 限流、只能靠直链抓 PDF 的情况）：
+    猜不出就返回空串——宁缺勿错，不能把正文首句或 arXiv 水印当成标题。
+    """
+    meta = _plausible_title(meta_title)
+    if meta:
+        return meta
+    for line in (first_page or "").split("\n"):
+        candidate = _plausible_title(line)
+        if candidate:
+            return candidate
+    return ""
 
 
 def _clean(text: str) -> str:
@@ -126,7 +166,7 @@ def _cut_references(pages: list[str]) -> tuple[list[str], bool]:
     return pages, False
 
 
-def _parse_with_pymupdf(path: Path) -> list[str] | None:
+def _parse_with_pymupdf(path: Path) -> tuple[list[str], str] | None:
     try:
         import pymupdf  # type: ignore  # 新版包名
     except Exception:  # noqa: BLE001
@@ -136,7 +176,9 @@ def _parse_with_pymupdf(path: Path) -> list[str] | None:
             return None
     try:
         with pymupdf.open(path) as doc:
-            return [page.get_text("text") for page in doc]
+            pages = [page.get_text("text") for page in doc]
+            meta_title = str((doc.metadata or {}).get("title") or "")
+            return pages, meta_title
     except Exception as exc:  # noqa: BLE001
         logger.warning("pymupdf 解析失败，回退 pdfplumber：%s", exc)
         return None
@@ -153,24 +195,28 @@ def _parse_with_pdfplumber(path: Path) -> list[str]:
 
 
 def parse_pdf(path: str | Path, cut_references: bool = True) -> ParsedDoc:
-    """解析 PDF 为逐页文本。"""
+    """解析 PDF 为逐页文本（并尽力猜一个标题，见 `guess_title`）。"""
     path = Path(path)
     if not path.exists():
         raise FileNotFoundError(f"PDF 不存在：{path}")
 
-    pages = _parse_with_pymupdf(path)
+    parsed = _parse_with_pymupdf(path)
     engine = "pymupdf"
-    if pages is None:
+    meta_title = ""
+    if parsed is None:
         pages = _parse_with_pdfplumber(path)
         engine = "pdfplumber"
+    else:
+        pages, meta_title = parsed
 
     pages = [_clean(p) for p in pages]
     pages = [p for p in pages if p.strip()]
     pages = _drop_repeated_margins(pages)
+    title = guess_title(pages[0] if pages else "", meta_title)
 
     truncated = False
     if cut_references:
         pages, truncated = _cut_references(pages)
         pages = [p for p in pages if p.strip()]
 
-    return ParsedDoc(pages=pages, engine=engine, truncated_references=truncated)
+    return ParsedDoc(pages=pages, engine=engine, truncated_references=truncated, title=title)

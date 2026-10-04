@@ -67,7 +67,7 @@ class Session:
             "tools_loaded": self.tools_loaded,
             "model": getattr(self.model, "model_name", None) or getattr(self.model, "model", None),
             "offline": self.offline,
-            "data_dir": str(self.settings.data_dir),
+            "data_dir": str(self.settings.data_path),
         }
 
 
@@ -96,7 +96,7 @@ def build_session(settings: Settings | None = None) -> Session:
         sig = slugify(embedding_signature(embeddings, s).replace(":", "-").replace("/", "-"), 40)
         s = s.model_copy(update={"data_dir": Path(s.data_dir) / "by-embedding" / sig})
         s.ensure_dirs()
-        logger.info("embedding 签名变化，改用独立索引目录 %s（%s）", s.data_dir, exc)
+        logger.info("embedding 签名变化，改用独立索引目录 %s（%s）", s.data_path, exc)
         index = PaperIndex.load_or_create(embeddings, s)
 
     model = None if s.fake_llm else get_chat_model("default", s)

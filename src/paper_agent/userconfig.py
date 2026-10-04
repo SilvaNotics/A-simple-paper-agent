@@ -26,7 +26,7 @@ import httpx
 from pydantic import SecretStr
 
 from .channels import channel_label, default_base_url, spec_for
-from .config import ROOT_DIR, Settings
+from .config import STATE_DIR, Settings, resolve_path
 from .utils import clean_pasted, clean_secret, mask_secret
 
 logger = logging.getLogger(__name__)
@@ -34,7 +34,7 @@ logger = logging.getLogger(__name__)
 CONFIG_ENV = "PAPER_AGENT_CONFIG"
 IGNORE_ENV = "PAPER_AGENT_IGNORE_USER_CONFIG"
 # 默认写进项目内：整个项目目录拷贝到别的机器/系统后配置与密钥一并带走。
-DEFAULT_CONFIG_PATH = ROOT_DIR / ".paper-agent" / "config.json"
+DEFAULT_CONFIG_PATH = STATE_DIR / "config.json"
 # 旧版位置（仅用于一次性迁移，不再作为默认读写路径）。
 LEGACY_CONFIG_PATH = Path("~/.config/paper-agent/config.json")
 
@@ -377,7 +377,8 @@ class UserConfig:
         explicit = path or os.getenv(CONFIG_ENV)
         if not explicit:
             _migrate_legacy_config()
-        self.path = Path(explicit).expanduser() if explicit else DEFAULT_CONFIG_PATH
+        # 相对路径统一相对仓库根解析（与 data/output 等保持一致），而非当前工作目录。
+        self.path = resolve_path(explicit) if explicit else DEFAULT_CONFIG_PATH
         self.default_provider: str = ""
         self.default_model: str = ""
         # 显式指定负责 embedding 的供应商（空 = 自动挑选：对话供应商 → 默认 → 第一个带 embedding 的）

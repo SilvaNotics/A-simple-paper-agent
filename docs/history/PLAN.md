@@ -1,5 +1,10 @@
 # 学术论文检索与概括分析 Agent（纯 Python + LangChain）设计方案
 
+> ⚠️ **本文是历史设计记录（设计期的方案 + 当时的实测回填），不是当前行为规范。**
+> 当前实现以 [`../ARCHITECTURE.md`](../ARCHITECTURE.md)（模块与机制）和 [`../../README.md`](../../README.md)（用法与配置）为准：
+> 其中提到的路径可能已变动（如供应商配置/命令行历史现在都在项目内 `.paper-agent/`，日志在 `logs/`，工作目录也已不是文中的路径）。
+> 需要「当时为什么这么设计」时看本文；需要「现在怎么用/怎么改」时看 ARCHITECTURE + README。
+
 > 工作目录：`/home/silva/projects/pypj/llmTest`（conda env `agent`，Python 3.14.7）
 > 状态：**已按本方案实现并验证**（见 §14 实现状态与实测回填）
 

@@ -17,12 +17,10 @@ from __future__ import annotations
 import asyncio
 import logging
 import sys
-from typing import Any
 
-from rich.console import Console, Group
+from rich.console import Console
 from rich.panel import Panel
 from rich.table import Table
-from rich.text import Text
 
 from .utils import clean_pasted, clean_secret, mask_secret
 from .userconfig import (
@@ -50,6 +48,7 @@ PRESETS: list[tuple[str, str, str]] = [
 
 __all__ = [
     "PRESETS",
+    "ask_line",
     "connect_flow",
     "embed_models_for",
     "pick_from_list",
@@ -57,6 +56,27 @@ __all__ = [
     "print_presets",
     "read_secret",
 ]
+
+
+# --------------------------------------------------------------------------
+# 安全的行输入（EOF 视为取消）
+# --------------------------------------------------------------------------
+
+
+def ask_line(console: Console, prompt: str) -> str:
+    """`console.input` 的安全包装：标准输入结束（EOF）时返回空串 = 取消。
+
+    交互命令里散布着多个追问（预设/base URL、y-N 确认、手动模型名…）。当 stdin 结束
+    —— Ctrl+D、或 stdin 被管道/子进程提前关闭 —— `console.input` 会抛 `EOFError`；
+    它在各问答步骤之间冒泡，只会让 REPL 打出一大段 traceback（用户什么都没做错）。
+    这里统一把它降级成空串，因为所有调用点本就把「空输入」当作取消。
+
+    返回值同样经 `clean_pasted` 清洗（终端粘贴会带括号粘贴标记）。
+    """
+    try:
+        return clean_pasted(console.input(prompt))
+    except EOFError:
+        return ""
 
 
 # --------------------------------------------------------------------------
@@ -70,7 +90,6 @@ def pick_from_list(
     current: str = "",
     default: str = "",
     title: str = "选择",
-    cursor_start: str | int | None = None,   # 兼容旧签名（当前项已决定初始位置）
     display: dict[str, str] | None = None,   # 值 → 展示标签（例如供应商行的说明）
     footer: str = "",
     display_class: str = "pick.model",       # 列表项配色类
@@ -80,12 +99,10 @@ def pick_from_list(
     交互（TTY）：prompt_toolkit 补全菜单 —— 输入即过滤、↑↓/PgUp/PgDn 滚动、
     `Enter` 选中、**`Ctrl+C` 设为默认**、`Ctrl+P` 切供应商（footer 非空时）、`Esc` 取消。
     非交互：一次性列出全部选项 + 编号输入（`d<编号>` 设默认、`/关键词` 过滤）。
+    初始高亮位置由 `current` 决定。
     """
     from .repl_input import pick_value
 
-    initial = current
-    if not initial and isinstance(cursor_start, str) and cursor_start in items:
-        initial = cursor_start
     return pick_value(
         console,
         list(items),
@@ -200,7 +217,7 @@ def _ask_base_url(console: Console, preset: str, current: str = "") -> str:
         f"[bold]请输入 base URL[/bold]（OpenAI 兼容端点，如 `https://api.deepseek.com`）{hint}"
     )
     console.print("[dim]（支持粘贴：Ctrl+Shift+V / 右键粘贴，然后回车；留空=取消）[/dim]")
-    raw = clean_pasted(console.input("base url › "))
+    raw = ask_line(console, "base url › ")
     return raw or current
 
 
@@ -247,7 +264,7 @@ def connect_flow(
         console.print(
             "[dim]输入预设编号（1-7）、0 手动输入 base URL，或直接粘贴 base URL；回车取消[/dim]"
         )
-        answer = clean_pasted(console.input("[bold]预设 / base URL[/bold] › ")) or preset
+        answer = ask_line(console, "[bold]预设 / base URL[/bold] › ") or preset
         if not answer:
             console.print("[yellow]未输入任何内容，已取消（不会连接任何端点）[/yellow]")
             return None
@@ -279,7 +296,7 @@ def connect_flow(
         console.print(f"[dim]将使用 key：[/dim][cyan]{mask_secret(api_key)}[/cyan]  [dim]→ {base_url}[/dim]")
     elif not allow_empty_key and resolved_kind != "local":
         console.print("[yellow]没有 key 也可以保存，但调用会失败。要继续吗？[/yellow]")
-        if clean_pasted(console.input("继续? [y/N] › ")).lower() not in {"y", "yes"}:
+        if ask_line(console, "继续? [y/N] › ").lower() not in {"y", "yes"}:
             return None
 
     resolved_name = name or provider_name(base_url, resolved_kind)
@@ -300,9 +317,7 @@ def connect_flow(
             "[yellow]该供应商还没有可用的对话模型[/yellow]"
             "（/models 未返回列表或未匹配到候选）。"
         )
-        manual = clean_pasted(
-            console.input("对话模型名（留空则稍后用 /models 选择）› ")
-        )
+        manual = ask_line(console, "对话模型名（留空则稍后用 /models 选择）› ")
         if manual:
             provider.chat_model = manual
             console.print(f"[green]✓[/green] 对话模型：{manual}")
