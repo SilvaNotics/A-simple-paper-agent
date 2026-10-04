@@ -1,11 +1,13 @@
 # -*- coding: utf-8 -*-
 """PDF 解析：优先 pymupdf（若安装），否则 pdfplumber。
 
-`ParsedDoc.pages` 保留页码，便于引用定位。
+`ParsedDoc.pages` 保留页码，便于引用定位。入口有两个：`parse_pdf()`（磁盘路径）与
+`parse_pdf_bytes()`（内存字节）——后者供 `/quick` 使用，**不写任何临时文件**。
 """
 
 from __future__ import annotations
 
+import io
 import logging
 import re
 from dataclasses import dataclass, field
@@ -166,7 +168,7 @@ def _cut_references(pages: list[str]) -> tuple[list[str], bool]:
     return pages, False
 
 
-def _parse_with_pymupdf(path: Path) -> tuple[list[str], str] | None:
+def _parse_with_pymupdf(source: "Path | bytes") -> tuple[list[str], str] | None:
     try:
         import pymupdf  # type: ignore  # 新版包名
     except Exception:  # noqa: BLE001
@@ -175,8 +177,14 @@ def _parse_with_pymupdf(path: Path) -> tuple[list[str], str] | None:
         except Exception:  # noqa: BLE001 - 未安装则回退 pdfplumber
             return None
     try:
-        with pymupdf.open(path) as doc:
-            pages = [page.get_text("text") for page in doc]
+        # 字节流走 stream=（`/quick` 不落盘）；路径原样交给 pymupdf
+        doc = (
+            pymupdf.open(stream=bytes(source), filetype="pdf")
+            if isinstance(source, (bytes, bytearray, memoryview))
+            else pymupdf.open(source)
+        )
+        with doc:
+            pages = [doc.load_page(i).get_text("text") for i in range(doc.page_count)]
             meta_title = str((doc.metadata or {}).get("title") or "")
             return pages, meta_title
     except Exception as exc:  # noqa: BLE001
@@ -184,31 +192,19 @@ def _parse_with_pymupdf(path: Path) -> tuple[list[str], str] | None:
         return None
 
 
-def _parse_with_pdfplumber(path: Path) -> list[str]:
+def _parse_with_pdfplumber(source: "Path | bytes") -> list[str]:
     import pdfplumber
 
+    target = io.BytesIO(bytes(source)) if isinstance(source, (bytes, bytearray, memoryview)) else source
     pages: list[str] = []
-    with pdfplumber.open(path) as pdf:
+    with pdfplumber.open(target) as pdf:
         for page in pdf.pages:
             pages.append(page.extract_text() or "")
     return pages
 
 
-def parse_pdf(path: str | Path, cut_references: bool = True) -> ParsedDoc:
-    """解析 PDF 为逐页文本（并尽力猜一个标题，见 `guess_title`）。"""
-    path = Path(path)
-    if not path.exists():
-        raise FileNotFoundError(f"PDF 不存在：{path}")
-
-    parsed = _parse_with_pymupdf(path)
-    engine = "pymupdf"
-    meta_title = ""
-    if parsed is None:
-        pages = _parse_with_pdfplumber(path)
-        engine = "pdfplumber"
-    else:
-        pages, meta_title = parsed
-
+def _finish_pages(pages: list[str], meta_title: str, engine: str, cut_references: bool) -> ParsedDoc:
+    """共用收尾：清洗 → 去页眉页脚 → 猜标题 → 截参考文献。"""
     pages = [_clean(p) for p in pages]
     pages = [p for p in pages if p.strip()]
     pages = _drop_repeated_margins(pages)
@@ -220,3 +216,33 @@ def parse_pdf(path: str | Path, cut_references: bool = True) -> ParsedDoc:
         pages = [p for p in pages if p.strip()]
 
     return ParsedDoc(pages=pages, engine=engine, truncated_references=truncated, title=title)
+
+
+def _parse_source(source: "Path | bytes", cut_references: bool = True) -> ParsedDoc:
+    parsed = _parse_with_pymupdf(source)
+    engine = "pymupdf"
+    meta_title = ""
+    if parsed is None:
+        pages = _parse_with_pdfplumber(source)
+        engine = "pdfplumber"
+    else:
+        pages, meta_title = parsed
+    return _finish_pages(pages, meta_title, engine, cut_references)
+
+
+def parse_pdf(path: str | Path, cut_references: bool = True) -> ParsedDoc:
+    """解析磁盘上的 PDF 为逐页文本（并尽力猜一个标题，见 `guess_title`）。"""
+    path = Path(path)
+    if not path.exists():
+        raise FileNotFoundError(f"PDF 不存在：{path}")
+    return _parse_source(path, cut_references)
+
+
+def parse_pdf_bytes(content: bytes, cut_references: bool = True) -> ParsedDoc:
+    """解析**内存里**的 PDF 字节，不写临时文件（`/quick` 的“不落盘”就靠它）。
+
+    与 `parse_pdf()` 共用同一套清洗/去页眉/截参考文献逻辑，因此两者输出一致。
+    """
+    if not content:
+        raise ValueError("PDF 内容为空")
+    return _parse_source(bytes(content), cut_references)

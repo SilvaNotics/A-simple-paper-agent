@@ -2,6 +2,8 @@
 """MCP 接入层：把搜索引擎 MCP server 的工具挂到 LangChain agent 上。
 
 - `mcp_servers.json` 只存模板（命令/传输），`${VAR}` 由环境变量展开，未配置的项会被丢弃；
+- stdio server 的 `cwd` 统一落在共享存放目录 `<MCP_STORAGE_DIR>/<server>/`（默认 `data/mcp/`），
+  下载/缓存不再写进用户 HOME，也不散落在当前工作目录；
 - 工具数很多（arxiv 19 + paper-search 57），用白名单收敛，避免上下文被 schema 占满；
 - 工具结果统一「文本化」成 JSON 字符串，方便模型阅读与离线单测。
 """
@@ -15,6 +17,7 @@ import re
 import shutil
 import sys
 import time
+from collections.abc import Mapping
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, cast
 
@@ -65,6 +68,14 @@ ALLOWED_TOOLS: set[str] = {
     "search_paper_text",
     "citation_graph",
     "export_citations",
+    # 通用网页 / DOI 元数据（`fetch` = mcp-server-fetch，`*_work*` = crossref-mcp）
+    "fetch",                      # 任意 URL → Markdown（非 PDF 页面正文）
+    "search_works",
+    "get_work",
+    "get_work_references",        # 免 key 的引文图（Crossref 参考文献表）
+    "get_work_quality",
+    # 生物医学（pubmedmcp）
+    "search_abstracts",           # Entrez 语法检索 + 摘要正文
 }
 
 # 明确排除：合规风险 / 不稳定 / 与主流程无关。
@@ -80,6 +91,13 @@ BLOCKED_TOOLS: set[str] = {
 
 # 未配 key 时必然 429 的工具（Semantic Scholar 匿名共享池限流），直接不暴露给模型。
 KEYLESS_BLOCKED_TOOLS: set[str] = {"search_semantic"}
+
+# 单源 server（server 名就是源 kind）：它的 `search*` 工具按该 kind 参与渠道收敛。
+# 多源聚合 server（paper-search）不在此列，靠工具名猜源。
+_SINGLE_SOURCE_SERVERS: dict[str, str] = {
+    "crossref": "crossref",
+    "pubmed": "pubmed",
+}
 
 # `filter_tools` 在拿不到 Settings 时的纯默认：空 = 不强制收敛 sources（默认无启用渠道）
 DEFAULT_MCP_SOURCES = ""
@@ -109,6 +127,9 @@ def _search_tool_kind(base_name: str, server: str = "") -> str:
         return server if server in MCP_SOURCE_KINDS and server != "paper-search" else ""
     if "search" not in low:
         return ""
+    # 单源 server（crossref / pubmed…）：整台 server 的检索工具都算该源
+    if server in _SINGLE_SOURCE_SERVERS:
+        return _SINGLE_SOURCE_SERVERS[server]
     for hint, kind in _SEARCH_TOOL_KINDS:
         if hint in low:
             return kind
@@ -138,6 +159,8 @@ def quiet_env() -> dict[str, str]:
         "FASTMCP_LOG_LEVEL": "ERROR",
         "FASTMCP_SHOW_SERVER_BANNER": "false",
         "PYTHONWARNINGS": "ignore",
+        # crossref-mcp 等用通用 `LOG_LEVEL` 控制 stderr 日志（stdio 下 stderr 会被采集）
+        "LOG_LEVEL": "ERROR",
     }
     if QUIET_DIR.exists():
         existing = os.environ.get("PYTHONPATH", "")
@@ -145,14 +168,68 @@ def quiet_env() -> dict[str, str]:
     return env
 
 
-def _expand(value: Any) -> Any:
+def mcp_child_env(settings: Settings | None = None) -> dict[str, str]:
+    """MCP 子进程 / 模板展开用的环境：`os.environ` 打底，settings 里配好的 MCP 变量覆盖。
+
+    `mcp_env()` 里有 `${MCP_STORAGE_DIR}` 这类「非密钥但必须存在」的变量，
+    所以模板展开与子进程 env 都用这一份合并结果。
+    """
+    env: dict[str, str] = {k: v for k, v in os.environ.items()}
+    env.update((settings or get_settings()).mcp_env())
+    return env
+
+
+def storage_dir(name: str, settings: Settings | None = None) -> Path:
+    """stdio MCP server 的私有存放子目录 `<MCP_STORAGE_DIR>/<server>/`（不存在则创建）。"""
+    path = (settings or get_settings()).mcp_storage_path / name
+    path.mkdir(parents=True, exist_ok=True)
+    return path
+
+
+# 这些可执行文件所在目录会被 `no_node=True` 的 server 从 PATH 里拿掉。
+# 起因：`mcp-server-fetch` → `readabilipy`(use_readability=True) 一旦看到 npm，
+# 就会在**运行时**在 site-packages 里 `npm install`（污染环境 + 往 stdout 写 npm 输出，
+# 而 stdio 传输下的 stdout 是 JSON-RPC 通道）。看不到 node 时它会自动退回纯 Python 抽取。
+_NODE_BINS = ("node", "npm", "npx")
+
+
+def path_without_node(path: str = "") -> str:
+    """去掉 PATH 里含 `node` / `npm` / `npx` 的目录（保留其余部分）。"""
+    keep: list[str] = []
+    for part in (path or "").split(os.pathsep):
+        if not part:
+            continue
+        if any((Path(part) / binary).exists() for binary in _NODE_BINS):
+            continue
+        keep.append(part)
+    return os.pathsep.join(keep)
+
+
+def _stdio_cwd(name: str, configured: Any, settings: Settings) -> str:
+    """stdio server 的工作目录：模板里没写（或没解析出来）就用共享存放目录下的同名子目录。
+
+    `paper-search-mcp` 的下载工具默认 `save_path="./downloads"`，cwd 决定了它落到哪里；
+    目录必须先建好，否则 stdio 子进程起不来（MCP SDK 不会替你建）。
+    """
+    cwd = str(configured or "").strip()
+    if cwd and not _has_unresolved(cwd):
+        try:
+            Path(cwd).mkdir(parents=True, exist_ok=True)
+            return cwd
+        except OSError as exc:  # 配置指到了不可写/非法路径 → 退回共享目录
+            logger.warning("MCP server %s 的 cwd 不可用（%s：%s），改用共享存放目录", name, cwd, exc)
+    return str(storage_dir(name, settings))
+
+
+def _expand(value: Any, env: Mapping[str, str] | None = None) -> Any:
     """展开字符串里的 ${VAR}；展开后仍含未解析变量的项由调用方过滤。"""
+    variables = os.environ if env is None else env
     if isinstance(value, str):
-        return _BRACED_VAR_RE.sub(lambda m: os.environ.get(m.group(1), m.group(0)), value)
+        return _BRACED_VAR_RE.sub(lambda m: variables.get(m.group(1), m.group(0)), value)
     if isinstance(value, dict):
-        return {k: _expand(v) for k, v in value.items()}
+        return {k: _expand(v, variables) for k, v in value.items()}
     if isinstance(value, list):
-        return [_expand(v) for v in value]
+        return [_expand(v, variables) for v in value]
     return value
 
 
@@ -172,6 +249,9 @@ def default_bin(name: str, settings: Settings | None = None) -> str:
     override = {
         "arxiv": s.arxiv_mcp_bin,
         "paper-search": s.paper_search_mcp_bin,
+        "fetch": s.fetch_mcp_bin,
+        "crossref": s.crossref_mcp_bin,
+        "pubmed": s.pubmed_mcp_bin,
     }.get(name, "")
     if override:
         return override
@@ -179,6 +259,9 @@ def default_bin(name: str, settings: Settings | None = None) -> str:
     candidates = {
         "arxiv": "arxiv-mcp-server",
         "paper-search": "paper-search-mcp",
+        "fetch": "mcp-server-fetch",
+        "crossref": "crossref-mcp",
+        "pubmed": "pubmedmcp",
     }
     script = candidates.get(name)
     if not script:
@@ -200,8 +283,7 @@ def load_server_specs(settings: Settings | None = None) -> dict[str, dict[str, A
         return {}
 
     raw = json.loads(path.read_text(encoding="utf-8"))
-    env_overlay = {k: v for k, v in os.environ.items()}
-    env_overlay.update({k: v for k, v in s.mcp_env().items()})
+    env_overlay = mcp_child_env(s)
 
     specs: dict[str, dict[str, Any]] = {}
     for name, spec in raw.items():
@@ -209,7 +291,7 @@ def load_server_specs(settings: Settings | None = None) -> dict[str, dict[str, A
             logger.info("跳过已禁用 MCP server: %s", name)
             continue
 
-        expanded = _expand(spec)
+        expanded = _expand(spec, env_overlay)
 
         # stdio：命令可能是 ${XXX_BIN} 占位符，未配置时退回自动探测
         if expanded.get("transport") == "stdio":
@@ -229,10 +311,15 @@ def load_server_specs(settings: Settings | None = None) -> dict[str, dict[str, A
             env = {k: v for k, v in (expanded.get("env") or {}).items() if not _has_unresolved(v)}
             env.update({k: v for k, v in s.mcp_env().items()})
             env.update(quiet_env())
+            if expanded.pop("no_node", False):
+                # 见 `_NODE_BINS`：不让子进程看到 node/npm，避免运行时 npm install
+                env["PATH"] = path_without_node(env.get("PATH") or os.environ.get("PATH", ""))
             if env:
                 expanded["env"] = env
             else:
                 expanded.pop("env", None)
+            # 统一存放目录：模板写了 cwd 就尊重，否则落到 <MCP_STORAGE_DIR>/<server>/。
+            expanded["cwd"] = _stdio_cwd(name, expanded.get("cwd"), s)
 
         if expanded.get("transport") != "stdio" and _has_unresolved(expanded.get("url", "")):
             logger.warning("跳过 MCP server %s：远程 URL 尚未配置具体地址/key", name)

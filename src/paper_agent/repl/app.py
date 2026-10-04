@@ -145,6 +145,8 @@ class Repl(SearchCommands, PaperCommands, ProviderCommands):
             self.cmd_ingest(rest)
         elif command == "/ask":
             self.cmd_ask(rest)
+        elif command == "/quick":
+            self.cmd_quick(rest)
         elif command == "/report":
             self.cmd_report(rest)
         elif command == "/papers":

@@ -44,6 +44,7 @@ certifi==2026.7.22
 cffi==2.1.1
 charset-normalizer==3.5.2
 click==8.5.0
+crossref-mcp==0.1.0
 cryptography==50.0.2
 cyclopts==5.1.1
 distro==1.9.0
@@ -58,6 +59,7 @@ feedparser-sgmllib==2.1.0
 frozenlist==1.8.0
 griffelib==2.3.0
 h11==0.16.0
+html5lib==1.1
 httpcore==1.0.9
 httpcore2==2.13.1
 httpx==0.28.1
@@ -90,7 +92,9 @@ langgraph-sdk==0.4.5
 langsmith==0.14.4
 lxml==6.1.3
 markdown-it-py==4.2.0
+markdownify==1.2.3
 mcp==1.30.0
+mcp-server-fetch==2026.8.18
 mdurl==0.1.2
 more-itertools==11.1.0
 multidict==6.9.1
@@ -108,6 +112,9 @@ pdfplumber==0.11.10
 pillow==12.3.0
 platformdirs==4.12.2
 propcache==0.5.4
+Protego==0.7.0
+pubmedclient==0.2.0
+pubmedmcp==0.1.4
 py-key-value-aio==0.4.6
 pycparser==3.0
 pydantic==2.13.5
@@ -123,6 +130,7 @@ python-dateutil==2.9.0.post0
 python-dotenv==1.2.4
 python-multipart==0.0.32
 PyYAML==6.0.3
+readabilipy==0.3.0
 referencing==0.37.0
 regex==2026.9.29
 requests==2.34.2
@@ -149,6 +157,7 @@ urllib3==2.8.0
 uuid_utils==0.17.1
 uvicorn==0.54.0
 watchfiles==1.3.0
+webencodings==0.6.1
 websockets==16.1.1
 xxhash==4.0.1
 yarl==1.25.1

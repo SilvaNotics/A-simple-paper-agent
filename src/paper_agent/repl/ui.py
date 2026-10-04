@@ -23,6 +23,7 @@ COMMANDS: dict[str, str] = {
     "/search": "联网检索论文（--limit = 每渠道上限；可用 LLM 扩展检索式并重排）",
     "/ingest": "下载 PDF 并入库，建立/更新向量索引",
     "/ask": "基于已入库语料带引用问答（直接输入自然语言同效）",
+    "/quick": "即问即用：现场抓取（内存，不落盘）→ RAG → 带引用回答",
     "/report": "端到端生成调研报告（md / bib / json）",
     "/papers": "查看或删除已入库论文；`open` 起本地预览（浏览器看抓到的 PDF）",
     "/channels": "配置搜索渠道；国内优先 / 全渠道并发开关",
@@ -49,6 +50,7 @@ COMMAND_USAGE: dict[str, str] = {
     "/search": "/search <关键词> [--limit N（每渠道最多 N 条）] [--ingest [N]] [--source auto|mcp|builtin|all] [--no-llm]",
     "/ingest": "/ingest <关键词> [--limit N] [--force]　或　/ingest --ids arxiv:2405.16506,10.1145/xxx",
     "/ask": "/ask <问题> [--papers a,b] [--k N]",
+    "/quick": "/quick <问题> [--papers N（抓几篇全文，默认 3）] [--limit N（每渠道候选上限）] [--k N] [--source auto|mcp|builtin|all]",
     "/report": "/report <主题> [--papers N] [--simple]",
     "/papers": "/papers [rm <id>|--all] | /papers open [--port N] [--host H] [--idle-timeout MIN] [--no-browser] | /papers close",
     "/channels": "/channels [list|add|rm|key-rm|on|off|all on|off|domestic on|off]",
@@ -73,7 +75,7 @@ COMMAND_USAGE: dict[str, str] = {
 # /help 的分组展示顺序（只列命令名）
 HELP_GROUPS: list[tuple[str, list[str]]] = [
     ("检索与抓取", ["/search", "/ingest", "/channels", "/index", "/mcp"]),
-    ("问答与报告", ["/ask", "/report", "/papers", "/history", "/save"]),
+    ("问答与报告", ["/ask", "/quick", "/report", "/papers", "/history", "/save"]),
     ("模型与供应商", ["/connect", "/providers", "/keys", "/models", "/model", "/embed"]),
     ("会话与调试", ["/offline", "/stream", "/history", "/logs", "/clear", "/help", "/exit"]),
 ]
@@ -85,6 +87,7 @@ HELP_EXAMPLES: list[tuple[str, str]] = [
     ("/ingest --ids arxiv:2405.16506", "已知 arXiv ID 直接抓取入库"),
     ("/channels all on", "检索时并发跑全部已注册渠道"),
     ("/ask 图 RAG 的主要方法有哪些", "基于本地语料带引用回答"),
+    ("/quick 图 RAG 的评测结论", "现场抓 3 篇全文→RAG→回答（PDF 不落盘）"),
     ("/report 图检索增强生成 --papers 3", "生成一份中文调研报告"),
     ("/logs 50", "看最近 50 行运行日志（定位报错/回退原因）"),
     ("/logs --files", "列出按天分的历史日志文件（默认保留 14 天）"),

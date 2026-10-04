@@ -94,6 +94,9 @@ class ReplBase:
     def cmd_search(self, args: str) -> None:
         raise NotImplementedError
 
+    def cmd_quick(self, args: str) -> None:
+        raise NotImplementedError
+
     def require_session(self) -> Session | None:
         raise NotImplementedError
 

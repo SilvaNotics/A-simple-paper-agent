@@ -25,11 +25,14 @@ dependencies:
       - langchain-text-splitters>=1.1,<2
       - langgraph>=1.2,<2
 
-      # ---- MCP：客户端适配器 + 两个学术检索服务端 ----
+      # ---- MCP：客户端适配器 + 五个学术检索服务端 ----
       - langchain-mcp-adapters>=0.3.2,<0.4
       - mcp>=1.24,<2.0                  # adapters 0.3.2 要求 mcp<2，勿升到 2.x
       - arxiv-mcp-server>=0.8.0
       - paper-search-mcp>=0.1.4
+      - crossref-mcp>=0.1.0             # DOI 元数据 + 参考文献表（免 key 引文图）
+      - pubmedmcp>=0.1.4                # PubMed Entrez 检索 + 摘要
+      - mcp-server-fetch>=2026.8        # 任意 URL → Markdown
       - fastmcp>=3.4                    # 假 MCP server（测试）与 paper-search-mcp 依赖
 
       # ---- 配置 / RAG / CLI ----

@@ -2,23 +2,53 @@
   "arxiv": {
     "transport": "stdio",
     "command": "${ARXIV_MCP_BIN}",
-    "args": [],
+    "args": ["--storage-path", "${MCP_STORAGE_DIR}/arxiv"],
+    "cwd": "${MCP_STORAGE_DIR}/arxiv",
     "env": {
       "SEMANTIC_SCHOLAR_API_KEY": "${SEMANTIC_SCHOLAR_API_KEY}"
     },
     "enabled": true,
-    "description": "arXiv 检索 / PDF / LaTeX 分节读取 / 引用图 / 导出 BibTeX"
+    "description": "arXiv 检索 / PDF / LaTeX 分节读取 / 引用图 / 导出 BibTeX（缓存落 <MCP_STORAGE_DIR>/arxiv）"
   },
   "paper-search": {
     "transport": "stdio",
     "command": "${PAPER_SEARCH_MCP_BIN}",
     "args": [],
+    "cwd": "${MCP_STORAGE_DIR}/paper-search",
     "env": {
       "PAPER_SEARCH_MCP_UNPAYWALL_EMAIL": "${UNPAYWALL_EMAIL}",
       "PAPER_SEARCH_MCP_SEMANTIC_SCHOLAR_API_KEY": "${SEMANTIC_SCHOLAR_API_KEY}"
     },
     "enabled": true,
-    "description": "多源论文检索（arXiv/OpenAlex/Crossref/Semantic Scholar/PubMed/D2BLP…）"
+    "description": "多源论文检索（arXiv/OpenAlex/Crossref/Semantic Scholar/PubMed/D2BLP…），下载落 <MCP_STORAGE_DIR>/paper-search"
+  },
+  "crossref": {
+    "transport": "stdio",
+    "command": "${CROSSREF_MCP_BIN}",
+    "args": [],
+    "cwd": "${MCP_STORAGE_DIR}/crossref",
+    "env": {
+      "CROSSREF_MAILTO": "${CROSSREF_MAILTO}"
+    },
+    "enabled": true,
+    "description": "Crossref 元数据深查：DOI 作品检索 / 参考文献表（免 key 引文图）/ 期刊 / 出版商 / 资助机构"
+  },
+  "pubmed": {
+    "transport": "stdio",
+    "command": "${PUBMED_MCP_BIN}",
+    "args": [],
+    "cwd": "${MCP_STORAGE_DIR}/pubmed",
+    "enabled": true,
+    "description": "PubMed Entrez 检索（字段限定 / 日期区间 / 排序）+ 摘要正文，生物医学覆盖更细"
+  },
+  "fetch": {
+    "transport": "stdio",
+    "command": "${FETCH_MCP_BIN}",
+    "args": [],
+    "cwd": "${MCP_STORAGE_DIR}/fetch",
+    "no_node": true,
+    "enabled": true,
+    "description": "任意 URL → Markdown（robots 友好、可分段读取）：抓项目主页 / 博客 / 非 PDF 页面正文"
   },
   "web-search": {
     "transport": "streamable_http",

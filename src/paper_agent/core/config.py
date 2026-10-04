@@ -148,6 +148,14 @@ class Settings(BaseSettings):
     mcp_servers_file: Path = Field(default=PACKAGE_DIR / "sources" / "mcp_servers.json")
     arxiv_mcp_bin: str = ""       # 留空则用当前解释器同目录下的 console script
     paper_search_mcp_bin: str = ""
+    # 其余 stdio MCP server 的可执行文件覆盖（留空＝当前解释器同目录的 console script，再退 PATH）
+    fetch_mcp_bin: str = ""          # mcp-server-fetch（任意 URL → Markdown）
+    crossref_mcp_bin: str = ""       # crossref-mcp（DOI 元数据 / 参考文献表）
+    pubmed_mcp_bin: str = ""         # pubmedmcp（Entrez 语法检索 PubMed 摘要）
+    # stdio MCP server 的**共享存放目录**：每个 server 用同名子目录（PDF / LaTeX / downloads 等），
+    # 既不再写进用户 HOME（arXiv 默认 ~/.arxiv-mcp-server），也不散落在当前工作目录。
+    # 相对路径相对仓库根；可用 MCP_STORAGE_DIR 指到大磁盘。
+    mcp_storage_dir: Path = Field(default=Path("data/mcp"))
     semantic_scholar_api_key: SecretStr | None = None
     unpaywall_email: str = ""        # Unpaywall 补链用的邮箱（留空则退回 openalex_mailto）
     # paper-search `search_papers` 的默认源。默认空：由 `/channels` 启用的渠道决定；
@@ -233,8 +241,13 @@ class Settings(BaseSettings):
     def servers_file(self) -> Path:
         return resolve_path(self.mcp_servers_file)
 
+    @property
+    def mcp_storage_path(self) -> Path:
+        """stdio MCP server 的共享存放根目录：默认 `<仓库根>/data/mcp/`。"""
+        return resolve_path(self.mcp_storage_dir)
+
     def ensure_dirs(self) -> None:
-        for p in (self.papers_dir, self.index_dir, self.output_path):
+        for p in (self.papers_dir, self.index_dir, self.output_path, self.mcp_storage_path):
             p.mkdir(parents=True, exist_ok=True)
 
     # ---------------- 搜索渠道 -------------
@@ -303,13 +316,18 @@ class Settings(BaseSettings):
 
     def mcp_env(self) -> dict[str, str]:
         """只透传已配置的 MCP 侧变量（未配置的不传，避免字面量 ${VAR} 残留）。"""
-        env: dict[str, str] = {}
+        # 共享存放目录始终可用：模板用 `${MCP_STORAGE_DIR}` 拼 stdio server 的 cwd / 参数。
+        env: dict[str, str] = {"MCP_STORAGE_DIR": str(self.mcp_storage_path)}
         if self.semantic_scholar_key:
             env["SEMANTIC_SCHOLAR_API_KEY"] = self.semantic_scholar_key
             env["PAPER_SEARCH_MCP_SEMANTIC_SCHOLAR_API_KEY"] = self.semantic_scholar_key
         if self.unpaywall_email:
             env["UNPAYWALL_EMAIL"] = self.unpaywall_email
             env["PAPER_SEARCH_MCP_UNPAYWALL_EMAIL"] = self.unpaywall_email
+        # Crossref polite pool（crossref-mcp）：有邮箱就带上，能明显降低被限流的概率
+        polite = self.unpaywall_email or self.openalex_mailto
+        if polite:
+            env["CROSSREF_MAILTO"] = polite
         return env
 
 

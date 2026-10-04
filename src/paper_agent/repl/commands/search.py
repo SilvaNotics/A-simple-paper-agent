@@ -251,6 +251,118 @@ class SearchCommands(ReplBase):
             }
         )
 
+    def _quick_table(self, items: list) -> Table:
+        """`/quick` 的抓取明细表（全部在内存，磁盘上什么都没多）。"""
+        from ...core.utils import truncate
+
+        table = Table(title="本次抓取（全部在内存，未落盘）")
+        table.add_column("paper_id")
+        table.add_column("标题")
+        table.add_column("内容")
+        table.add_column("页", justify="right")
+        table.add_column("chunks", justify="right")
+        for item in items:
+            label = {
+                "pdf": "PDF 全文",
+                "web": "网页正文",
+                "abstract": "仅摘要",
+                "metadata": "仅题录",
+            }.get(item.kind, item.kind)
+            text = f"[yellow]{label}[/yellow]" if not item.full_text else label
+            table.add_row(
+                item.paper.paper_id,
+                truncate(item.paper.title or "-", 42),
+                text,
+                str(item.pages or "-"),
+                str(item.chunks),
+            )
+        return table
+
+    def cmd_quick(self, args: str) -> None:
+        """`/quick <问题>`：现场从已启用渠道抓取 → RAG → LLM 回答，**PDF 不落盘**。"""
+        question, flags = split_args(args)
+        if not question:
+            ui.console.print(
+                "[yellow]用法：/quick <问题> [--papers N] [--limit N] [--k N] "
+                "[--source auto|mcp|builtin|all][/yellow]"
+            )
+            return
+        session = self.require_session()
+        if session is None:
+            return
+
+        from ...pipeline.quick import DEFAULT_QUICK_LIMIT, DEFAULT_QUICK_PAPERS, run_quick
+
+        papers = max(1, int(flags.get("papers", DEFAULT_QUICK_PAPERS)))
+        limit = max(papers, int(flags.get("limit", max(papers * 3, DEFAULT_QUICK_LIMIT))))
+        k = int(flags.get("k", 0))
+        on_token = self._stream_renderer() if self.stream and not session.offline else None
+        deadline = max(1.0, self.settings.search_timeout) + max(1.0, self.settings.llm_timeout) + 30.0
+
+        def show_fetched(items: list) -> None:
+            ui.console.print(self._quick_table(items))
+
+        ui.console.print(
+            f"[dim]检索 → 内存抓全文（最多 {papers} 篇）→ 向量化 → 生成：{question}[/dim]"
+        )
+        try:
+            result = self._run_async(
+                asyncio.wait_for(
+                    run_quick(
+                        question,
+                        session=session,
+                        limit=limit,
+                        papers=papers,
+                        k=k,
+                        source=flags.get("source", ""),
+                        stream_callback=on_token,
+                        on_fetched=show_fetched,
+                    ),
+                    timeout=deadline,
+                )
+            )
+        except asyncio.TimeoutError:
+            ui.console.print(f"\n[red]等待超过 {deadline:.0f}s，已中止[/red]")
+            return
+        except KeyboardInterrupt:
+            ui.console.print("\n[yellow]已中断[/yellow]")
+            return
+        except RuntimeError as exc:
+            ui.console.print(f"\n[red]{exc}[/red]")
+            return
+        finally:
+            self._stop_live()
+
+        if result.message:
+            ui.console.print(f"[yellow]{result.message}[/yellow]")
+            ui.console.print(f"[dim]来源：{result.route}[/dim]")
+            return
+
+        if on_token is None:
+            ui.console.print(Markdown(result.answer.text))
+        else:
+            # 流式：token 已 append-only 打印过，这里只补一个换行，**绝不重打**
+            ui.console.print()
+
+        cited = ", ".join(result.answer.citation_ids) or "（无）"
+        if result.problems:
+            ui.console.print(f"\n[dim]引用：{cited}[/dim]  [yellow]校验：{'; '.join(result.problems)}[/yellow]")
+        else:
+            ui.console.print(f"\n[dim]引用：{cited}[/dim]  [green]引用校验通过[/green]")
+        ui.console.print(
+            f"[dim]来源：{result.route} ｜ 临时索引 {result.chunks} chunks"
+            "（PDF 与索引都没落盘，要留档用 /ingest --ids <id>）[/dim]"
+        )
+        self.history.append(
+            {
+                "question": question,
+                "answer": result.answer.text,
+                "citations": result.answer.citation_ids,
+                "problems": result.problems,
+                "mode": "quick",
+            }
+        )
+
     def cmd_report(self, args: str) -> None:
         topic, flags = split_args(args)
         if not topic:
@@ -302,6 +414,7 @@ class SearchCommands(ReplBase):
         if not specs:
             ui.console.print("[yellow]没有可用的 MCP server（pip install arxiv-mcp-server paper-search-mcp）[/yellow]")
             return
+        ui.console.print(f"[dim]stdio 存放目录：{self.settings.mcp_storage_path}[/dim]")
         with ui.console.status("[cyan]读取 MCP 工具列表…[/cyan]"):
             data = self._run_async(describe_mcp_tools(self.settings))
         table = Table(title="MCP servers")

@@ -10,7 +10,7 @@
 ```
 入口      main.py（REPL / 一次性）        cli.py（typer 子命令）
               │                              │
-编排          pipeline/session.py（可复用流水线：run_search / run_ingest / ask / run_report）
+编排          pipeline/（session.py：run_search / run_ingest / ask / run_report；quick.py：run_quick）
               │
      ┌────────┼───────────────┬───────────────────────┐
      ▼        ▼               ▼                       ▼
@@ -24,7 +24,7 @@ llm/search  tools/*      + llm/factory          + 四个专家 agent
 ```
 
 **分层原则**：底层只提供能力（配置、模型、检索、RAG），中间层是确定性流水线，上层（图/REPL/CLI）只做编排与呈现。
-`main.py` 与 `cli.py` 不直接做检索或 RAG，全部经 `pipeline/session.py`，保证两种入口行为一致。
+`main.py` 与 `cli.py` 不直接做检索或 RAG，全部经 `pipeline/`（`session.py` 为主，`quick.py` 复用其 `ask()`），保证两种入口行为一致。
 
 **一次 `report` 的数据流**：
 
@@ -122,11 +122,13 @@ plan → search_one×N → merge → ingest_one×M → summarize_one×M
 
 ### `sources/mcp.py` + `sources/mcp_servers.json` — MCP 接入
 
-- `sources/mcp_servers.json`：只存模板（stdio 命令 / streamable_http URL），`${VAR}` 由 `load_server_specs()` 展开；命令缺失或 URL 未配置的 server 自动跳过。
-- `quiet_env()` + `sources/mcp_quiet/sitecustomize.py`：给 MCP 子进程注入 `PYTHONPATH`，收敛第三方 logger 刷屏。
+- `sources/mcp_servers.json`：只存模板（stdio 命令 / streamable_http URL），`${VAR}` 由 `load_server_specs()` 展开；命令缺失或 URL 未配置的 server 自动跳过。默认五个 stdio server：`arxiv`（arXiv 精读：分节/LaTeX/引文图/BibTeX）、`paper-search`（20+ 源聚合检索）、`crossref`（DOI 元数据 + 参考文献表）、`pubmed`（Entrez 检索 + 摘要）、`fetch`（任意 URL → Markdown）。
+- **stdio 统一存放目录**：所有 stdio server 的 `cwd` 默认落到 `<MCP_STORAGE_DIR>/<server>/`（默认 `data/mcp/`，`MCP_STORAGE_DIR` 可覆盖）；arXiv 额外用 `--storage-path` 把 PDF/LaTeX 缓存从 `~/.arxiv-mcp-server` 挪进同一目录，paper-search 的 `save_path="./downloads"` 也随之落在 `data/mcp/paper-search/downloads`。`mcp_env()` 把 `MCP_STORAGE_DIR` 透传给子进程，模板可直接用。
+- `quiet_env()` + `sources/mcp_quiet/sitecustomize.py`：给 MCP 子进程注入 `PYTHONPATH`，收敛第三方 logger 刷屏（`FASTMCP_LOG_LEVEL` / `LOG_LEVEL`）。
+- **`no_node`（模板开关）**：声明后该 server 的 PATH 会被去掉含 `node` / `npm` / `npx` 的目录（`path_without_node()`）。目前只给 `fetch` 用——它的依赖 `readabilipy` 一旦看到 npm 就会在**运行时**在 site-packages 里 `npm install`（污染环境，且 npm 输出写进 stdout 会把 stdio 的 JSON-RPC 通道弄脏）；看不到 node 时它会自动退回纯 Python 抽取。
 - `build_client()`：`MultiServerMCPClient`，开启工具名前缀、工具异常转错误文本、调用日志拦截器。
-- `filter_tools()`：白名单收敛（76→27）、黑名单排除（scihub / google_scholar / watch 等）、无 S2 key 时不暴露 `search_semantic`；
-  `only_enabled_sources=True` 时**进一步按已启用渠道收敛检索工具**（聚合工具 `search_papers` 保留，由 `sources` 参数限定；`arxiv-mcp-server` 那种单源 `search_papers` 按 arxiv 是否启用决定去留）。
+- `filter_tools()`：白名单收敛（现 5 个 server 共 96→32）、黑名单排除（scihub / google_scholar / watch 等）、无 S2 key 时不暴露 `search_semantic`；
+  `only_enabled_sources=True` 时**进一步按已启用渠道收敛检索工具**（聚合工具 `search_papers` 保留，由 `sources` 参数限定；`arxiv-mcp-server` 那种单源 `search_papers`、以及 `crossref` / `pubmed` 这类单源 server 的 `search_*` 按对应渠道是否启用决定去留；`get_*` / `read_*` / `fetch` 不受渠道开关影响）。
 - `guard_search_sources()`：改写 `search_papers` 的 `sources` 为已启用渠道，剔除无 key 的 semantic；无可配置源时不擅自改写。
 - `textify_tool()`：把 MCP content blocks 拍平成 JSON 文本，方便模型阅读与离线断言。
 - `describe_mcp_tools()`：`mcp-tools` 命令的诊断数据（各 server 原始/保留工具数）。
@@ -137,11 +139,11 @@ plan → search_one×N → merge → ingest_one×M → summarize_one×M
 
 | 文件 | 原理 |
 |---|---|
-| `fetch.py` | 只抓开放获取 PDF：命中本地缓存直接返回；`httpx` 下载后校验 `%PDF` 魔数再落 `data/papers/<safe_filename(paper_id)>.pdf`（文件名规则在 `core.utils.safe_filename`）。返回 `(path, message)`，失败原因会写进入库结果。 |
-| `parse.py` | 优先 `pymupdf`（更快更准），失败/未装回退 `pdfplumber`。清洗：合并跨行连字符、压缩空白、去多页重复的页眉页脚；`_cut_references()` 在文末 References 处截断（保守策略，只在确实像文献表时才切）。`ParsedDoc` 保留逐页文本、engine 与 `title`（`guess_title()`：优先 PDF 内嵌元数据，其次首页第一行像标题的文本；仅在元数据缺失时作兜底）。 |
+| `fetch.py` | 只抓开放获取 PDF：命中本地缓存直接返回；`httpx` 下载后校验 `%PDF` 魔数再落 `data/papers/<safe_filename(paper_id)>.pdf`（文件名规则在 `core.utils.safe_filename`）。返回 `(path, message)`，失败原因会写进入库结果。`fetch_pdf_bytes()` 是同一条下载链的**内存版**（不落盘；命中缓存则直接读缓存），供 `/quick` 用。 |
+| `parse.py` | 优先 `pymupdf`（更快更准），失败/未装回退 `pdfplumber`。清洗：合并跨行连字符、压缩空白、去多页重复的页眉页脚；`_cut_references()` 在文末 References 处截断（保守策略，只在确实像文献表时才切）。`ParsedDoc` 保留逐页文本、engine 与 `title`（`guess_title()`：优先 PDF 内嵌元数据，其次首页第一行像标题的文本；仅在元数据缺失时作兜底）。入口 `parse_pdf()`（路径）与 `parse_pdf_bytes()`（内存字节，走 pymupdf `stream=`）共用同一套收尾逻辑，输出一致。 |
 | `split.py` | `RecursiveCharacterTextSplitter`（中英混排分隔符）+ 每 chunk 元数据 `paper_id/title/page/chunk_index/source`。非 PDF 内容走 `split_text_document()`：不带页码，改用 `kind=web/abstract/metadata` 标记内容级别；`build_record_text()` 生成带 `[仅题录…]`/`[仅摘要…]` 前缀的书目文本，提醒模型这不是全文证据。 |
 | `embeddings.py` | `RetryingEmbeddings`：遇到 `batch size` 类 400 自动**二分拆批**，瞬态错误（429/5xx/超时）指数退避重试。 |
-| `store.py` | `PaperIndex` = `InMemoryVectorStore` + 本地 JSON 持久化。`dump/load` 直接复用 langchain 内置能力；另维护 `manifest.json`（论文 → chunk id 列表、PDF 路径、sha256、元数据），支持增量更新与删除。`embedding_signature()` 记录模型+维度，加载时不匹配抛 `IndexSignatureError`。检索用 `similarity_search_with_score(filter=...)` 按 `paper_id` 过滤。 |
+| `store.py` | `PaperIndex` = `InMemoryVectorStore` + 本地 JSON 持久化。`dump/load` 直接复用 langchain 内置能力；另维护 `manifest.json`（论文 → chunk id 列表、PDF 路径、sha256、元数据），支持增量更新与删除。`embedding_signature()` 记录模型+维度，加载时不匹配抛 `IndexSignatureError`。检索用 `similarity_search_with_score(filter=...)` 按 `paper_id` 过滤。`PaperIndex(..., persist=False)` 时 `save()` 是空操作 → `/quick` 的临时索引完全不碰磁盘。 |
 | `retriever.py` | `CitationCollector` 给片段编锚点（`{prefix}C1..Cn`，并行分支带不同前缀避免撞号）；`format_context()` 渲染带锚点上下文（`kind=web/abstract/metadata` 的片段会标「网页正文 / 仅摘要，无全文 / 仅题录，无全文」）；`retrieve()` / `retrieve_across_papers()`（每篇保底片段数，避免证据偏置）/ `_hybrid_rerank()`（可选 BM25 线性加权）。**引用校验**：`tokenize/support_ratio/has_anchor` 做字面重合，`hard_tokens/cross_lingual_support` 用术语/数字做跨语言判定；`verify_answer()` 综合判定，`verify_report_citations()` 校验最终报告锚点。 |
 
 ---
@@ -150,7 +152,7 @@ plan → search_one×N → merge → ingest_one×M → summarize_one×M
 
 ### `tools/`
 
-- `paper_tools.py`：`ingest_paper()` 确定性入库（**补链 → 下载 → 解析 → 切分 → 向量化 → 落盘**）。没有 PDF 直链时按四级降级：`indexed`（PDF 全文）→ `web`（抓网页正文，Wikipedia/百科/新闻页）→ `abstract`（仅摘要）→ `metadata`（仅题录），后三者都在 chunk 内容里标注「非全文」并写 `kind`，不会伪装成 PDF 证据；确实取不到内容才是 `no_pdf`，另有 `parse_error / empty / embed_error`。`INDEXED_STATUSES`（`core.schema`）集中定义「已入库」状态，CLI/REPL/图校验共用。`make_paper_tools()` 暴露给 agent 的 `download_and_index_paper` / `list_indexed_papers`。
+- `paper_tools.py`：`collect_documents()` 是一篇论文「变成 chunks」的唯一实现（**不写索引**）：`save_pdf=True`（`/ingest`）落盘后解析，`save_pdf=False` 或直接给 `pdf_bytes`（`/quick`）则只走内存（`fetch_pdf_bytes` + `parse_pdf_bytes`）。没有 PDF 直链时按四级降级：`indexed`（PDF 全文）→ `web`（抓网页正文，Wikipedia/百科/新闻页）→ `abstract`（仅摘要）→ `metadata`（仅题录），后三者都在 chunk 内容里标注「非全文」并写 `kind`，不会伪装成 PDF 证据；确实取不到内容才是 `no_pdf`，另有 `parse_error / empty / embed_error`。`ingest_paper()` 在其上追加「清旧 + 向量化 + 落盘」并返回结果字典。`INDEXED_STATUSES`（`core.schema`）集中定义「已入库」状态，CLI/REPL/图校验共用。`make_paper_tools()` 暴露给 agent 的 `download_and_index_paper` / `list_indexed_papers`。
 - `rag_tools.py`：`make_rag_tools()` 给 agent 的 `search_corpus` / `read_chunk`（检索结果写进 `CitationCollector`）。
 
 ### `agents/`
@@ -180,6 +182,12 @@ plan → search_one×N → merge → ingest_one×M → summarize_one×M
 - `ask()` → `AskResult`：检索 → 生成 → `normalize_answer_citations()` + `verify_answer()`；流式路径 `_stream_answer()`。
 - **复读保护**：`RepetitionGuard`（流式实时检测并停止）、`truncate_repetition()`（相邻/滚动窗口复读）、`dedupe_repeated_blocks()`（非相邻整块复读）、`collapse_repetition()`（段落+句子+整块+末尾四重折叠）、`clean_stream_output()`（去掉泄漏的 JSON 尾巴）。
 - `run_report()`：组装依赖 → 编译并运行监督图 → 落盘三件套。
+
+### `pipeline/quick.py` — `/quick`：即问即用，PDF 不落盘
+
+- `run_quick()`：候选（像 ID 就 `resolve_ids`，否则 `run_search` 走渠道）→ 挑「优先能拿到全文」的候选（本地缓存 > PDF 直链 > 仅元数据）→ 逐篇 `collect_documents(save_pdf=False)` 抓进内存 → `PaperIndex(persist=False)` 建**临时索引** → 复用 `ask()`（检索 + 引用校验 + 流式/离线路径；用临时 `Session` 顶掉真索引）→ 返回 `QuickResult`（含每篇的 `kind` / 页数 / chunks）。
+- `on_fetched` 回调让交互层在生成前先打印抓取明细表；全程不写 `data/papers/` 与 `data/index/`。
+- 想留档走 `/ingest` / `/search --ingest`（那条路径才会落盘）。
 
 ### `agents/supervisor.py` — LangGraph 监督图
 
@@ -263,7 +271,7 @@ src/paper_agent/
     oa.py                      全文兜底：补链（Unpaywall/OpenAlex/落地页 meta）+ 网页正文抓取
     mcp.py                     MCP 接入：server 加载、工具白名单/源收敛/参数护栏/文本化
     userconfig.py              供应商 JSON 配置：识别/读写/模型分类/注入 Settings
-    mcp_servers.json           MCP server 模板（stdio / streamable_http）
+    mcp_servers.json           MCP server 模板（stdio / streamable_http；cwd 统一指 <MCP_STORAGE_DIR>/<server>/）
     mcp_quiet/sitecustomize.py 静音 MCP 子进程的第三方日志
   llm/                         模型层
     factory.py                 聊天/embedding 模型工厂（供应商优先级、thinking、重试）
@@ -272,7 +280,7 @@ src/paper_agent/
   rag/                         RAG 层
     fetch.py / parse.py / split.py / embeddings.py / store.py / retriever.py
   tools/                       工具层
-    paper_tools.py             确定性入库 + 索引查询工具
+    paper_tools.py             collect_documents（内存/落盘两态）+ ingest_paper + 索引查询工具
     rag_tools.py               search_corpus / read_chunk 工具
   agents/                      Agent 层
     common.py / prompts.py    结构化结果提取、各角色提示词
@@ -283,13 +291,14 @@ src/paper_agent/
     supervisor.py              LangGraph 监督图与 simple 模式
   pipeline/                    编排层
     session.py                 可复用流水线：搜索/入库/问答/报告 + 复读保护
+    quick.py                   `/quick`：即问即用（内存抓全文 + 临时索引，不落盘）
     report.py                  Markdown / BibTeX / JSON 渲染与落盘
   pdf/
     server.py                  本地 PDF 预览：回环 HTTP 服务 + 列表页（`/papers open`）
   repl/                        交互层
     app.py                     Repl 核心：命令分发、帮助、主循环、事件循环与流式渲染
     base.py                    mixin 共享状态 + 核心方法签名（供类型检查）
-    commands/search.py         SearchCommands：/search /ingest /ask /report /mcp /channels
+    commands/search.py         SearchCommands：/search /ingest /ask /quick /report /mcp /channels
     commands/papers.py         PaperCommands：/papers /index /logs /history /save + PDF 预览服务
     commands/providers.py      ProviderCommands：/connect /providers /keys /models /model /embed /offline
     ui.py                      命令表/帮助分组、检索进度视图、readline 历史

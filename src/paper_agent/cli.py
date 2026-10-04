@@ -21,6 +21,7 @@ from rich.table import Table
 from .core.config import Settings, get_settings
 from .core.logging import resolve_log_file, setup_logging
 from .core.schema import INDEXED_STATUSES, INGEST_STATUS_STYLES
+from .core.utils import truncate
 from .pdf.server import DEFAULT_PORT as PDF_DEFAULT_PORT
 from .pdf.server import collect_pdf_entries, registered_server, start_viewer, stop_registered_server
 
@@ -219,6 +220,75 @@ def ask(
         console.print("[yellow]引用校验：[/yellow]" + "；".join(result.problems))
     else:
         console.print("[green]引用校验通过[/green]")
+
+
+@app.command("quick")
+def quick(
+    question: str = typer.Argument(..., help="问题（也可以是 arXiv id / DOI）"),
+    papers: int = typer.Option(3, "--papers", "-n", help="现场抓几篇全文（默认 3）"),
+    limit: int = typer.Option(0, "--limit", help="每渠道候选上限（0=自动）"),
+    k: int = typer.Option(0, "--k", help="检索片段数（0=用配置默认）"),
+    source: str = typer.Option("", "--source", help="检索层：auto / mcp / builtin / all"),
+    offline: bool = typer.Option(False, "--offline", help="离线自检：假模型 + 假 embedding"),
+    verbose: bool = typer.Option(False, "--verbose", "-v"),
+) -> None:
+    """即问即用：现场抓全文 → RAG → 带引用回答（**PDF 与索引都不落盘**）。"""
+    _setup_logging(verbose)
+    from .pipeline.quick import DEFAULT_QUICK_LIMIT, run_quick
+    from .pipeline.session import build_session
+
+    session = build_session(cli_settings(offline=offline))
+    n = max(1, papers)
+    try:
+        result = _run(
+            run_quick(
+                question,
+                session=session,
+                limit=max(n * 3, limit or DEFAULT_QUICK_LIMIT),
+                papers=n,
+                k=k,
+                source=source,
+            )
+        )
+    except (RuntimeError, ValueError) as exc:
+        console.print(f"[red]{exc}[/red]")
+        raise typer.Exit(code=3) from exc
+
+    if result.items:
+        table = Table(title="本次抓取（全部在内存，未落盘）")
+        table.add_column("paper_id")
+        table.add_column("标题")
+        table.add_column("内容")
+        table.add_column("页", justify="right")
+        table.add_column("chunks", justify="right")
+        for item in result.items:
+            label = {"pdf": "PDF 全文", "web": "网页正文", "abstract": "仅摘要", "metadata": "仅题录"}.get(
+                item.kind, item.kind
+            )
+            table.add_row(
+                item.paper.paper_id,
+                truncate(item.paper.title or "-", 42),
+                label,
+                str(item.pages or "-"),
+                str(item.chunks),
+            )
+        console.print(table)
+
+    if result.message:
+        console.print(f"[yellow]{result.message}[/yellow]")
+        console.print(f"[dim]来源：{result.route}[/dim]")
+        raise typer.Exit(code=4)
+
+    console.print(Markdown(result.answer.text))
+    console.print(f"\n[dim]引用：{', '.join(result.answer.citation_ids) or '（无）'}[/dim]")
+    if result.problems:
+        console.print("[yellow]引用校验：[/yellow]" + "；".join(result.problems))
+    else:
+        console.print("[green]引用校验通过[/green]")
+    console.print(
+        f"[dim]来源：{result.route} ｜ 临时索引 {result.chunks} chunks"
+        "（PDF 与索引都没落盘，要留档用 ingest --ids <id>）[/dim]"
+    )
 
 
 # --------------------------------------------------------------------------
@@ -610,6 +680,7 @@ def mcp_tools(
         console.print("  pip install arxiv-mcp-server paper-search-mcp")
         raise typer.Exit(code=2)
 
+    console.print(f"[dim]stdio 存放目录：{get_settings().mcp_storage_path}[/dim]")
     report_data = _run(describe_mcp_tools())
 
     table = Table(title="MCP servers")

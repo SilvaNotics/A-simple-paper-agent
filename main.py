@@ -7,6 +7,7 @@
     python main.py --search "graph rag"    # 一次性检索
     python main.py --ingest "graph rag"    # 一次性入库
     python main.py --report "主题" --papers 3
+    python main.py --quick "问题"            # 即抓即答（全文只在内存，PDF 不落盘）
     python main.py --offline                # 假模型 + 独立索引目录（无密钥自检）
 
 进入 REPL 后输入 `/` 弹出命令面板（Tab 补全、Enter 确认），`/help` 查看全部命令；
@@ -63,6 +64,9 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--search-ingest", action="store_true", help="--search 时把结果直接入库")
     parser.add_argument("--no-llm", action="store_true", help="检索时不调用 LLM（关闭查询扩展/重排）")
     parser.add_argument("--report", metavar="TOPIC", help="一次性生成报告")
+    parser.add_argument(
+        "--quick", metavar="QUERY", help="即问即用：现场抓全文→RAG→回答（PDF 不落盘）"
+    )
     parser.add_argument("--papers", type=int, default=0, help="报告/入库的最大论文数")
     parser.add_argument("--simple", action="store_true", help="报告使用 simple 单 agent 模式")
     parser.add_argument("--offline", action="store_true", help="假模型 + 独立索引目录")
@@ -96,6 +100,9 @@ def main(argv: list[str] | None = None) -> int:
         flags = f" --papers {args.papers}" if args.papers else ""
         flags += " --simple" if args.simple else ""
         repl.cmd_report(f"{args.report}{flags}")
+        return 0
+    if args.quick:
+        repl.cmd_quick(f"{args.quick} --papers {args.papers or 3}")
         return 0
     if args.question:
         repl.cmd_ask(" ".join(args.question))

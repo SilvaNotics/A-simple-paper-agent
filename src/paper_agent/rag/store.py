@@ -50,10 +50,17 @@ def embedding_signature(embeddings: Embeddings, settings: Settings | None = None
 
 
 class PaperIndex:
-    """论文语料的向量索引（内存 + JSON 落盘）。"""
+    """论文语料的向量索引（内存 + JSON 落盘）。
 
-    def __init__(self, embeddings: Embeddings, settings: Settings | None = None) -> None:
+    `persist=False` 时 `save()` 全部变成空操作：给 `/quick` 的**临时索引**用——
+    数据只在内存里活着，命令结束即释放，不会污染 `data/index/`。
+    """
+
+    def __init__(
+        self, embeddings: Embeddings, settings: Settings | None = None, persist: bool = True
+    ) -> None:
         self.settings = settings or get_settings()
+        self.persist = persist
         self.batch_size = max(1, min(BATCH_SIZE, self.settings.embed_batch_size))
         self.embeddings = embeddings
         self.store = InMemoryVectorStore(embedding=embeddings)
@@ -106,6 +113,8 @@ class PaperIndex:
             return index
 
     def save(self) -> None:
+        if not self.persist:
+            return  # 临时索引（/quick）：只在内存里，命令结束即释放
         s = self.settings
         s.ensure_dirs()
         tmp = s.index_file.with_suffix(".json.tmp")

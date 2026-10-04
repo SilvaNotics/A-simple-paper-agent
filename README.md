@@ -25,7 +25,7 @@ python main.py              # 进入交互式 REPL
 
 ```bash
 python -m src.paper_agent selftest     # 模型 / embedding 是否可用
-python -m src.paper_agent mcp-tools    # MCP server 与工具白名单（可选）
+python -m src.paper_agent mcp-tools    # MCP server 与工具白名单（可选；默认 5 个：arxiv / paper-search / crossref / pubmed / fetch）
 ```
 
 ## 配置
@@ -48,6 +48,7 @@ python -m src.paper_agent mcp-tools    # MCP server 与工具白名单（可选�
 | `.paper-agent/history*` | 命令行历史（项目内，随项目移植） |
 | `data/papers/` | **论文库**：下载的 OA 全文 PDF 缓存 |
 | `data/index/`、`data/by-embedding/<签名>/` | 向量索引（按 embedding 签名隔离） |
+| `data/mcp/<server>/` | **stdio MCP server 的共享存放目录**：`arxiv/`（PDF + LaTeX 缓存）、`paper-search/downloads/`；`MCP_STORAGE_DIR` 可改到别处（如大磁盘）。`/quick` 不走这里（全文只在内存） |
 | `output/` | **报告默认保存位置**：`<时间戳>-<slug>.md` + `.bib` + `.json`；`/save` 的会话也存这里 |
 | `logs/paper-agent-YYYY-MM-DD.log` | **运行日志**（项目内，**按天分文件**）：控制台只显示 WARNING，INFO/DEBUG 都在这里；自动保留最近 14 天（`PAPER_AGENT_LOG_KEEP_DAYS`），单日超过 8 MiB 续写 `-02`；REPL 里 `/logs` 看末尾、`/logs --files` 看历史 |
 
@@ -61,6 +62,7 @@ python main.py "跨块图增强解决了什么问题？"   # 一次性问答（�
 python main.py --search "graph rag"    # 一次性检索
 python main.py --ingest "graph rag"    # 一次性入库
 python main.py --report "主题" --papers 3
+python main.py --quick "问题"           # 即抓即答（全文只在内存，PDF 不落盘）
 python main.py --offline               # 假模型 + 独立索引目录（无密钥自检）
 ```
 
@@ -71,6 +73,7 @@ python main.py --offline               # 假模型 + 独立索引目录（无密
 | `/search <词> [--limit N] [--ingest [N]] [--source auto\|mcp\|builtin\|all] [--no-llm]` | 联网检索；`--limit N` = **每个渠道**最多 N 条（不随 LLM 扩展的检索式数量放大） |
 | `/ingest <词> [--limit N] [--ids arxiv:xxx] [--force]` | 下载入库，建立/更新索引；没有 PDF 直链时逐级降级：补链 → 网页正文 → 仅摘要/仅题录（标注为非全文） |
 | `/ask <问题> [--papers a,b] [--k N]` | 带引用问答（默认流式） |
+| `/quick <问题> [--papers N] [--limit N] [--k N]` | **即问即答**：现场从已启用渠道抓全文 → 内存 RAG → 带引用回答，**PDF 与索引都不落盘**（见下） |
 | `/report <主题> [--papers N] [--simple]` | 端到端报告 → `output/<时间戳>-<slug>.{md,bib,json}` |
 | `/papers [rm <id>\|--all]` · `/papers open` · `/index` · `/mcp` | 论文 / 索引 / MCP 工具；`open` 起本地预览，用浏览器看抓到的 PDF（见下）；`close` 停服务 |
 | `/channels [add\|rm\|key-rm\|on\|off\|all on\|domestic on]` | **搜索渠道配置**（见下） |
@@ -78,6 +81,19 @@ python main.py --offline               # 假模型 + 独立索引目录（无密
 | `/offline [on\|off]` · `/stream [on\|off]` · `/history` · `/save` · `/logs [n] [--files]` · `/clear` · `/exit` | 会话管理（`/logs` 看今天日志末尾，`/logs --files` 列历史日志文件） |
 
 交互特性：Tab 补全 + 历史；`/models` 输入即筛选（Enter 本次使用、Ctrl+C 设为默认、Ctrl+P 换供应商）；流式输出 append-only（不重绘）；单条命令报错/`Ctrl-C` 不退出会话；支持管道 `printf '/index\n/exit\n' | python main.py`。
+
+#### 即问即答，PDF 不落盘（`/quick`）
+
+```bash
+/quick 图 RAG 在企业知识库里的主要做法      # 现场抓 3 篇全文 → RAG → 带引用回答
+/quick arxiv:2405.16506 --papers 1        # 也可以直接给 ID（不走渠道检索）
+/quick 某个主题 --papers 5 --limit 12     # 多抓几篇 / 放宽每渠道候选上限
+```
+
+- **与 `/ask` 的区别**：`/ask` 只问**已入库**语料；`/quick` 即问即用——现场从已启用渠道（`/channels`）检索候选，把 PDF 抓到**内存**、`pymupdf` 从字节流解析、切分后写进**临时向量索引**，回答完即释放。
+- **磁盘上不多一个文件**：不写 `data/papers/*.pdf`、不写 `data/index/`、也不建临时文件（`fetch_pdf_bytes()` + `parse_pdf_bytes()` + `PaperIndex(persist=False)`）。
+- 抓不到 PDF 时同样逐级降级（网页正文 → 仅摘要 → 仅题录），命令输出里的表格会标出每篇用的是哪一级。
+- 想留档：`/ingest --ids <id>`（或 `/search <词> --ingest`）。CLI 等价：`python -m src.paper_agent quick "问题" --papers 3`。
 
 #### 用浏览器看抓到的 PDF（`/papers open`）
 
@@ -192,8 +208,9 @@ src/paper_agent/
 | `SEARCH_USE_LLM` | `true` | 检索时用 LLM 做查询扩展 + 重排（`--no-llm` 可关） |
 | `PAPER_AGENT_THEME` | `dark` | 界面配色 `dark` / `light` / `none` |
 | `PAPER_AGENT_LOG_DIR` / `PAPER_AGENT_LOG_LEVEL` | `logs` / `DEBUG` | 日志目录（项目内，按天分文件）与文件级别；`PAPER_AGENT_LOG_KEEP_DAYS`（默认 14）、`PAPER_AGENT_LOG_MAX_MB`（默认 8，超出续写 `-02`）；`PAPER_AGENT_LOG_DISABLE=1` 关文件日志；`PAPER_AGENT_LOG_FILE` 改成固定单文件 |
+| `MCP_STORAGE_DIR` | `data/mcp` | stdio MCP server 的共享存放目录（每个 server 一个同名子目录）；`ARXIV_MCP_BIN` / `PAPER_SEARCH_MCP_BIN` / `FETCH_MCP_BIN` / `CROSSREF_MCP_BIN` / `PUBMED_MCP_BIN` 可覆盖各自的可执行文件 |
 | `PAPER_AGENT_PDF_IDLE_MIN` | 30 | 本地 PDF 预览服务空闲多少分钟自动退出（0 = 不自动退出） |
-| `OPENALEX_MAILTO` | 空 | 进 OpenAlex/Crossref polite pool（更稳） |
+| `OPENALEX_MAILTO` | 空 | 进 OpenAlex/Crossref polite pool（更稳；也会透传给 `crossref-mcp` 作 `CROSSREF_MAILTO`） |
 | `UNPAYWALL_EMAIL` | 空 | 无直链时用 Unpaywall 补链查 OA 全文（留空则退回 `OPENALEX_MAILTO`） |
 | `PDF_LOOKUP` / `WEB_FALLBACK` / `RECORD_FALLBACK` | `true` | 无 PDF 直链时的三级兜底：补链 / 抓网页正文 / 入库题录·摘要（`WEB_TEXT_MIN_CHARS` 默认 400，网页正文短于此判为无效） |
 
@@ -202,7 +219,7 @@ src/paper_agent/
 ## 测试
 
 ```bash
-python -m pytest          # 453 passed，全部离线（假模型 / 假 embedding / 假 MCP server）
+python -m pytest          # 474 passed，全部离线（假模型 / 假 embedding / 假 MCP server）
 python -m mypy src main.py
 ```
 
@@ -232,5 +249,5 @@ python -m mypy src main.py
 2. **只用开放获取**：已屏蔽 `download_scihub` 与 `search_google_scholar`；部分出版社（如 MDPI）会 403。
 3. **默认内存向量库 + 本地 JSON**：适合单次调研（数百篇内），更大语料建议换 FAISS/Qdrant（替换 `PaperIndex` 内部实现即可）。
 4. **国内库边界**：ChinaXiv、国家图书馆有公开免 key 接口；百度学术需千帆 key、万方需 APPCODE；知网/维普/超星**无公开检索 API**，不做绕过抓取（可用官方题录导出后走 `/ingest --ids`）。
-5. **MCP 工具数量**：`paper-search-mcp` 暴露 57 个工具，靠白名单过滤，勿关闭。
+5. **MCP 工具数量**：`paper-search-mcp` 暴露 57 个工具、`crossref-mcp` 18 个，靠白名单过滤，勿关闭。
 6. **离线模式索引独立**：`--offline` 用假 embedding，固定 `data/offline/`，与真实索引不混用。
