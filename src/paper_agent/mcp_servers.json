@@ -1,0 +1,29 @@
+{
+  "arxiv": {
+    "transport": "stdio",
+    "command": "${ARXIV_MCP_BIN}",
+    "args": [],
+    "env": {
+      "SEMANTIC_SCHOLAR_API_KEY": "${SEMANTIC_SCHOLAR_API_KEY}"
+    },
+    "enabled": true,
+    "description": "arXiv 检索 / PDF / LaTeX 分节读取 / 引用图 / 导出 BibTeX"
+  },
+  "paper-search": {
+    "transport": "stdio",
+    "command": "${PAPER_SEARCH_MCP_BIN}",
+    "args": [],
+    "env": {
+      "PAPER_SEARCH_MCP_UNPAYWALL_EMAIL": "${UNPAYWALL_EMAIL}",
+      "PAPER_SEARCH_MCP_SEMANTIC_SCHOLAR_API_KEY": "${SEMANTIC_SCHOLAR_API_KEY}"
+    },
+    "enabled": true,
+    "description": "多源论文检索（arXiv/OpenAlex/Crossref/Semantic Scholar/PubMed/D2BLP…）"
+  },
+  "web-search": {
+    "transport": "streamable_http",
+    "url": "https://mcp.exa.ai/mcp?exaApiKey=${EXA_API_KEY}",
+    "enabled": false,
+    "description": "通用网页搜索 MCP（示例：Exa 远程 MCP，需自备 key；默认关闭）"
+  }
+}

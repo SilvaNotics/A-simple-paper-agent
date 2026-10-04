@@ -1,0 +1,49 @@
+# ============================================================================
+# 学术论文检索与概括分析 Agent —— conda 环境（简洁版：只列直接依赖）
+#
+#   conda env create -f environment.yml     # 创建
+#   conda activate agent                    # 激活
+#   python -m src.paper_agent selftest      # 自检（chat / embedding）
+#
+# 完整依赖（含全部传递依赖、精确版本，端口化移植用）见 requirements.txt。
+# 若需完全复刻本机 conda 环境（含 conda 构建号），用 `conda env export` 重新导出。
+# ============================================================================
+name: agent
+channels:
+  - defaults
+  # - conda-forge        # 若 defaults 找不到某个包，可启用
+
+dependencies:
+  - python>=3.11          # 本方案验证于 3.14.7（arxiv-mcp-server 要求 >=3.11）
+  - pip
+
+  - pip:
+      # ---- LangChain / LangGraph / 模型接入 ----
+      - langchain>=1.4,<2
+      - langchain-core>=1.6,<2
+      - langchain-openai>=1.6,<2
+      - langchain-text-splitters>=1.1,<2
+      - langgraph>=1.2,<2
+
+      # ---- MCP：客户端适配器 + 两个学术检索服务端 ----
+      - langchain-mcp-adapters>=0.3.2,<0.4
+      - mcp>=1.24,<2.0                  # adapters 0.3.2 要求 mcp<2，勿升到 2.x
+      - arxiv-mcp-server>=0.8.0
+      - paper-search-mcp>=0.1.4
+      - fastmcp>=3.4                    # 假 MCP server（测试）与 paper-search-mcp 依赖
+
+      # ---- 配置 / RAG / CLI ----
+      - pydantic>=2.9
+      - pydantic-settings>=2.2
+      - python-dotenv>=1.0
+      - httpx>=0.27
+      - numpy                           # langchain-core 内存向量库算余弦相似度需要（隐式依赖）
+      - pymupdf>=1.28                   # PDF 解析首选（实测质量优于 pdfplumber）
+      - pdfplumber>=0.11                # PDF 解析回退
+      - rich>=13
+      - typer>=0.12
+
+      # ---- 开发 / 测试 / 类型检查（不需要可删） ----
+      - pytest>=8
+      - pytest-asyncio>=0.24
+      - mypy>=1.11
